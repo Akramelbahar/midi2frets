@@ -1,0 +1,52 @@
+# Guitar tab transformer — reference of default hyperparameters.
+# NOTE: this file is documentation, not loaded at runtime; every script
+# takes these values as argparse defaults / CLI flags (see README).
+
+# Data
+data_dir: "data/raw"
+processed_dir: "data/processed"
+raw_files:
+  - "data/raw/file.json"
+
+# Audio / symbolic constants
+tpq: 960
+seq_len: 128
+stride: 64
+
+# Model
+d_model: 256
+nhead: 8
+num_layers: 4
+dim_feedforward: 1024
+dropout: 0.1
+num_strings: 6
+
+# Training
+batch_size: 32
+epochs: 200
+lr: 1.0e-4
+weight_decay: 0.01
+grad_clip: 1.0
+playability_weight: 0.1
+chord_weight: 0.2
+# Technique multi-task loss weights (schema.py vocabularies; see README §3b/§7).
+# Each is independently 0-disableable; all are masked so unlabeled notes (e.g.
+# not-yet-regenerated legacy corpus JSON) contribute nothing to these terms.
+transition_weight: 0.3
+effects_weight: 0.15
+harmonic_weight: 0.1
+bend_type_weight: 0.1
+bend_magnitude_weight: 0.05
+physical_weight: 0.05
+transpose_range: 3
+note_drop_rate: 0.05
+
+# Inference
+beam_width: 5
+hand_shift_weight: 0.5
+technique_threshold: 0.5
+
+# Paths
+# Same default across run.py train / evaluate.py / midi_infer.py (Phase 17
+# unification -- training and inference used to disagree on this).
+checkpoint: "checkpoints/model_gp.pt"

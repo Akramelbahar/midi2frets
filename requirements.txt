@@ -1,0 +1,10 @@
+torch>=2.0.0
+numpy
+PyGuitarPro
+pretty_midi
+mido  # already a transitive dep of pretty_midi, but imported directly by
+      # midi_infer.py for raw MIDI channel evidence PrettyMIDI's Instrument
+      # abstraction does not preserve (see midi_infer.py's evidence layer)
+scipy  # linear_sum_assignment (Hungarian matching) for train.py's
+       # permutation-invariant multi-guitar slot loss
+pytest  # test suite only (tests/), not needed to train or run inference

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guitar Tab Transformer — Documentation</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --accent: #38bdf8;
+            --accent-2: #a78bfa;
+            --ok: #4ade80;
+            --warn: #facc15;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        header {
+            padding: 4rem 1rem 3rem;
+            text-align: center;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            border-bottom: 1px solid #334155;
+        }
+        header h1 { margin: 0; font-size: 2.5rem; }
+        header p { color: var(--muted); max-width: 700px; margin: 1rem auto 0; }
+        .badge {
+            display: inline-block;
+            padding: .25rem .75rem;
+            border-radius: 999px;
+            font-size: .8rem;
+            font-weight: 600;
+            margin: .25rem;
+        }
+        .badge.accent { background: rgba(56,189,248,.15); color: var(--accent); }
+        .badge.ok { background: rgba(74,222,128,.15); color: var(--ok); }
+        .badge.warn { background: rgba(250,204,21,.15); color: var(--warn); }
+        main { max-width: 900px; margin: 0 auto; padding: 2rem 1rem; }
+        section { margin-bottom: 3rem; }
+        h2 { color: var(--accent); border-bottom: 1px solid #334155; padding-bottom: .5rem; }
+        h3 { color: var(--accent-2); margin-top: 1.5rem; }
+        .card {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            border: 1px solid #334155;
+        }
+        code, pre {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            background: #020617;
+            border-radius: 6px;
+            font-size: .9rem;
+        }
+        code { padding: .15rem .4rem; }
+        pre { padding: 1rem; overflow-x: auto; border: 1px solid #1e293b; }
+        pre code { background: transparent; padding: 0; }
+        ul { padding-left: 1.25rem; }
+        li { margin: .4rem 0; }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .metric {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 1rem;
+            text-align: center;
+        }
+        .metric .value { font-size: 1.5rem; font-weight: 700; color: var(--ok); }
+        .metric .label { color: var(--muted); font-size: .85rem; }
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--muted);
+            border-top: 1px solid #334155;
+        }
+        a { color: var(--accent); }
+        .share-checklist { list-style: none; padding-left: 0; }
+        .share-checklist li::before {
+            content: "✓ ";
+            color: var(--ok);
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🎸 Guitar Tab Transformer</h1>
+        <p>
+            A PyTorch Transformer that reads Songsterr JSON and predicts the optimal guitar string for every note.
+            Fret is derived deterministically: <code>fret = pitch - tuning[string] - capo</code>.
+        </p>
+        <div>
+            <span class="badge accent">PyTorch</span>
+            <span class="badge accent">Transformer Encoder</span>
+            <span class="badge ok">Constraint Masking</span>
+            <span class="badge ok">Beam Search</span>
+            <span class="badge warn">Songsterr JSON</span>
+        </div>
+    </header>
+
+    <main>
+        <section>
+            <h2>What It Does</h2>
+            <div class="card">
+                <ul>
+                    <li>Reads symbolic guitar music from Songsterr JSON files.</li>
+                    <li>Predicts <strong>only the string</strong> (0–5) for each note.</li>
+                    <li>Computes fret deterministically from pitch, tuning and capo.</li>
+                    <li>Includes a hand-position playability loss and a DP baseline.</li>
+                    <li>Supports different capos and tunings in the same training batch.</li>
+                </ul>
+            </div>
+        </section>
+
+        <section>
+            <h2>Architecture</h2>
+            <div class="card">
+                <pre><code>Input features (integers, PAD=0)
+  ├── pitch           (0–127)
+  ├── duration_bucket (0–9)
+  ├── delta_bucket    (0–9)
+  ├── beat_position   (0–15)
+  ├── bar_position    (0–3)
+  ├── chord_size      (0–5)
+  └── chord_index     (0–5)
+
+↓ one nn.Embedding per feature, sum → 256-d
+↓ sinusoidal positional encoding + dropout
+↓ 4-layer Pre-LN Transformer encoder (8 heads, ff=1024)
+↓ Dropout + Linear(256, 6)
+↓ constraint mask: impossible strings → -inf
+↓ softmax → predicted string</code></pre>
+            </div>
+        </section>
+
+        <section>
+            <h2>Repository Layout</h2>
+            <div class="card">
+                <pre><code>midi2Frets/
+├── data/raw/              # Songsterr JSON tracks
+├── data/processed/        # Evaluation outputs
+├── checkpoints/           # Saved .pt models
+├── src/
+│   ├── parser.py
+│   ├── constraints.py
+│   ├── model.py
+│   ├── dataset.py
+│   ├── train.py
+│   ├── inference.py
+│   ├── dp_baseline.py
+│   ├── metrics.py
+│   ├── tab_render.py
+│   ├── evaluate.py
+│   ├── extract_har.py
+│   └── fetch_songsterr.py
+├── config.yaml
+├── requirements.txt
+├── README.md
+└── index.html   ← you are here</code></pre>
+            </div>
+        </section>
+
+        <section>
+            <h2>Quick Start</h2>
+
+            <h3>1. Install dependencies</h3>
+            <div class="card">
+                <pre><code>pip install -r requirements.txt</code></pre>
+            </div>
+
+            <h3>2. Validate a Songsterr file</h3>
+            <div class="card">
+                <pre><code>PYTHONPATH=src python src/parser.py data/raw/file.json</code></pre>
+                <p>Must pass the 100% pitch equation check: <code>pitch == tuning[string] + fret + capo</code>.</p>
+            </div>
+
+            <h3>3. Train on one song (overfit sanity check)</h3>
+            <div class="card">
+                <pre><code>PYTHONPATH=src python src/train.py \
+  --data data/raw/file.json \
+  --overfit --no-augment \
+  --batch 4 --epochs 200 \
+  --save checkpoints/model_noaug.pt</code></pre>
+                <p>Expected: string accuracy > 95%, typically reaches 100%.</p>
+            </div>
+
+            <h3>4. Train on multiple songs</h3>
+            <div class="card">
+                <pre><code>PYTHONPATH=src python src/train.py \
+  --data "data/raw/file.json" \
+         "data/raw/nirvana_smells_like_teen_spirit - Kurt_Cobain___1969_Fender_Mustang___Main_Guitar.json" \
+         "data/raw/nirvana_smells_like_teen_spirit - Kurt_Cobain___1969_Fender_Mustang___Overdubs.json" \
+  --batch 16 --epochs 50 \
+  --save checkpoints/model_multi.pt</code></pre>
+            </div>
+
+            <h3>5. Evaluate & render ASCII tabs</h3>
+            <div class="card">
+                <pre><code>PYTHONPATH=src python src/evaluate.py \
+  --data data/raw/file.json \
+  --checkpoint checkpoints/model_multi.pt \
+  --render --out data/processed/eval.txt</code></pre>
+            </div>
+
+            <h3>6. Run DP baseline alone</h3>
+            <div class="card">
+                <pre><code>PYTHONPATH=src python src/dp_baseline.py data/raw/file.json</code></pre>
+            </div>
+        </section>
+
+        <section>
+            <h2>Training Results</h2>
+            <div class="card">
+                <p>Models were trained on the data in <code>data/raw/</code>. The multi-song checkpoint uses tracks with standard 6-string tuning; bass/drum tracks are excluded because they have a different string count.</p>
+                <div class="metric-grid">
+                    <div class="metric">
+                        <div class="value">100%</div>
+                        <div class="label">Overfit file.json accuracy</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value">99.7%</div>
+                        <div class="label">Final model on file.json</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value">99.7%</div>
+                        <div class="label">Final model on Nirvana main guitar</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value">~63%</div>
+                        <div class="label">DP baseline average</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Adding More Training Data</h2>
+            <div class="card">
+                <p>Songsterr track JSONs are served from a CDN with a per-revision access hash. The hash is only available in your browser's network log.</p>
+                <ol>
+                    <li>Discover song/revision IDs:</li>
+                </ol>
+                <pre><code>PYTHONPATH=src python src/fetch_songsterr.py --search "artist song" --out data/processed</code></pre>
+                <ol start="2">
+                    <li>Open the tab in a browser, load all tracks, and save the network log as HAR.</li>
+                    <li>Extract track JSONs:</li>
+                </ol>
+                <pre><code>PYTHONPATH=src python src/extract_har.py www.songsterr.com.har --out data/raw</code></pre>
+                <ol start="4">
+                    <li>Re-run <code>train.py</code> with the new files.</li>
+                </ol>
+            </div>
+        </section>
+
+        <section>
+            <h2>How to Share This Project</h2>
+            <div class="card">
+                <ul class="share-checklist">
+                    <li>Include all source files under <code>src/</code>.</li>
+                    <li>Include <code>requirements.txt</code> and <code>config.yaml</code>.</li>
+                    <li>Include sample data in <code>data/raw/</code> or provide download instructions.</li>
+                    <li>Include trained checkpoints in <code>checkpoints/</code> (large; use Git LFS or a release asset).</li>
+                    <li>Use <code>README.md</code> and this <code>index.html</code> for documentation.</li>
+                    <li>Add a LICENSE if you want others to reuse the code.</li>
+                </ul>
+                <p style="margin-top:1rem;">
+                    <strong>Tip:</strong> keep this <code>index.html</code> at the repo root so GitHub Pages can serve it as a project homepage.
+                </p>
+            </div>
+        </section>
+
+        <section>
+            <h2>Key Design Decisions</h2>
+            <div class="card">
+                <ul>
+                    <li><strong>String-only prediction:</strong> fret is deterministic, simplifying the output space and guaranteeing physical feasibility.</li>
+                    <li><strong>Constraint masking:</strong> impossible strings are never sampled at training or inference.</li>
+                    <li><strong>Pre-LN Transformer:</strong> more stable training than Post-LN.</li>
+                    <li><strong>Bidirectional attention:</strong> the full sequence is known, so causal masking is unnecessary.</li>
+                    <li><strong>Differentiable playability:</strong> expected fret via softmax, no argmax.</li>
+                    <li><strong>Per-note capo/tuning:</strong> enables mixed-dataset training.</li>
+                </ul>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        Built with PyTorch · Documentation generated for the Guitar Tab Transformer project.
+    </footer>
+</body>
+</html>
