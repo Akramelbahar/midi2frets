@@ -178,6 +178,32 @@ def quantize_notes(
     return notes
 
 
+def ticks_to_seconds(tick: int, tempo_events: "list[dict[str, Any]] | None", tpq: int = TPQ_DEFAULT) -> float:
+    """§7 of the multi-guitar hardening pass: convert an absolute tick to
+    absolute elapsed real-world seconds since tick 0, integrating over every
+    tempo change in `tempo_events` (each `{"time_ticks": int, "bpm": float}`,
+    sorted or not). This is what makes hand-movement scoring TEMPO-AWARE --
+    a one-beat gap is a very different amount of real time at 60 BPM (1s)
+    than at 200 BPM (0.3s), which pure tick/beat arithmetic can never see.
+
+    Falls back to a flat 120 BPM if `tempo_events` is None/empty (matches
+    every other tempo-defaulting call site in this codebase)."""
+    events = sorted(tempo_events, key=lambda e: e["time_ticks"]) if tempo_events else []
+    if not events or events[0]["time_ticks"] > 0:
+        events = [{"time_ticks": 0, "bpm": 120.0}] + events
+    seconds = 0.0
+    for i, ev in enumerate(events):
+        seg_start = ev["time_ticks"]
+        seg_end = events[i + 1]["time_ticks"] if i + 1 < len(events) else None
+        if tick <= seg_start:
+            break
+        span_end = tick if (seg_end is None or tick < seg_end) else seg_end
+        seconds += (span_end - seg_start) / tpq * (60.0 / max(1e-6, ev["bpm"]))
+        if seg_end is not None and tick < seg_end:
+            break
+    return seconds
+
+
 def notated_duration_name(duration_ticks: int, tpq: int = TPQ_DEFAULT) -> str:
     """Closest standard notated duration name (whole..64th) for a tick span
     -- diagnostic/display use, not used for the GP5 event sweep itself

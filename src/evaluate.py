@@ -14,6 +14,7 @@ from metrics import (
     source_note_coverage, duplicate_output_rate, hard_constraint_violation_rate,
     chord_stretch_distribution, sustain_collision_rate, hand_movement_stats,
     guitar_utilization, track_fragmentation, multi_guitar_export_reparse_preservation,
+    guitar_switch_count, difficult_chord_count, search_exhaustion_rate,
 )
 from model import (
     GuitarStringTransformer, load_compatible_state_dict, trained_heads_from_missing,
@@ -23,11 +24,21 @@ from parser import parse_songsterr
 from tab_render import compare_tabs
 
 
-def evaluate_multi_guitar(midi_path: str, max_guitars: int, out_path: str) -> None:
+def evaluate_multi_guitar(
+    midi_path: str, max_guitars: int, out_path: str,
+    arrangement_mode: str = "minimum", search_mode: str = "balanced", sustain_policy: str = "preserve",
+) -> None:
     """§17: evaluate the structural multi-guitar decoder end to end on a real
     MIDI file. No checkpoint/model involved -- decode_song/auto_select_
     guitar_count are pure heuristic-cost CSP+beam search (see multi_guitar.py),
-    so this exercises the actual working system, not an untrained neural head."""
+    so this exercises the actual working system, not an untrained neural head.
+
+    Hardening pass additions: `arrangement_mode`/`search_mode`/
+    `sustain_policy` (§3/§13/§14/§18) are forwarded to the real pipeline
+    (not just the defaults), and the report now also includes
+    guitar_switch_count/difficult_chord_count/search_exhaustion_rate (§22) --
+    useful for directly comparing "minimum" vs "preserve" vs "arrange" on
+    the SAME input file."""
     from midi_infer import run_multi_guitar_pipeline, import_midi_notes
 
     # Import independently (same non-destructive default policies
@@ -37,22 +48,32 @@ def evaluate_multi_guitar(midi_path: str, max_guitars: int, out_path: str) -> No
     import_result = import_midi_notes(midi_path)
     input_ids = [n["source_note_id"] for n in import_result["notes"]]
 
-    song = run_multi_guitar_pipeline(midi_path, request={"guitar_count": "auto", "max_guitars": max_guitars})
+    song = run_multi_guitar_pipeline(midi_path, request={
+        "guitar_count": "auto", "max_guitars": max_guitars,
+        "arrangement_mode": arrangement_mode, "quality": search_mode, "sustain_policy": sustain_policy,
+    })
     guitar_tracks = song["guitar_tracks"]
+    decode_diags = song["diagnostics"].get("decode_diagnostics", [])
 
     lines = [
         f"MIDI: {midi_path}",
+        f"Arrangement mode: {arrangement_mode} | Search mode: {search_mode} | Sustain policy: {sustain_policy}",
         f"Guitar count searched: {song['diagnostics'].get('guitar_count_searched')}",
-        f"Decode feasible: {song['diagnostics'].get('decode_feasible')}",
+        f"Decode feasible: {song['diagnostics'].get('decode_feasible')} "
+        f"(status: {song['diagnostics'].get('search_status')})",
         "",
         f"source_note_coverage: {source_note_coverage(input_ids, guitar_tracks)}",
         f"duplicate_output_rate: {duplicate_output_rate(guitar_tracks)}",
         f"hard_constraint_violation_rate: {hard_constraint_violation_rate(guitar_tracks, song['request']['playability_profile'])}",
         f"chord_stretch_distribution: {chord_stretch_distribution(guitar_tracks)}",
         f"sustain_collision_rate: {sustain_collision_rate(guitar_tracks)}",
+        f"notes_shortened_by_sustain_policy: {song['diagnostics'].get('notes_shortened', 0)}",
         f"hand_movement_stats: {hand_movement_stats(guitar_tracks)}",
         f"guitar_utilization: {guitar_utilization(guitar_tracks)}",
         f"track_fragmentation: {track_fragmentation(guitar_tracks)}",
+        f"guitar_switch_count: {guitar_switch_count(guitar_tracks)}",
+        f"difficult_chord_count: {difficult_chord_count(guitar_tracks, song['request']['playability_profile'])}",
+        f"search_exhaustion_rate: {search_exhaustion_rate(decode_diags)}",
         f"export_reparse_preservation: {multi_guitar_export_reparse_preservation(song)}",
         "",
     ]
@@ -84,10 +105,24 @@ def main():
                               "architecture-only scaffolding) and reports source-note conservation, "
                               "constraint-violation rate, and export/reparse preservation.")
     parser.add_argument("--multi-guitar-max-guitars", type=int, default=8)
+    parser.add_argument("--multi-guitar-arrangement-mode", default="minimum",
+                         choices=["minimum", "preserve", "arrange"],
+                         help="Hardening pass §3: forwarded to run_multi_guitar_pipeline")
+    parser.add_argument("--multi-guitar-search-mode", default="balanced",
+                         choices=["fast", "balanced", "best", "exact"],
+                         help="Hardening pass §13/§14: forwarded to run_multi_guitar_pipeline")
+    parser.add_argument("--multi-guitar-sustain-policy", default="preserve",
+                         choices=["strict", "preserve", "practical"],
+                         help="Hardening pass §12: forwarded to run_multi_guitar_pipeline")
     args = parser.parse_args()
 
     if args.multi_guitar_midi:
-        evaluate_multi_guitar(args.multi_guitar_midi, args.multi_guitar_max_guitars, args.out)
+        evaluate_multi_guitar(
+            args.multi_guitar_midi, args.multi_guitar_max_guitars, args.out,
+            arrangement_mode=args.multi_guitar_arrangement_mode,
+            search_mode=args.multi_guitar_search_mode,
+            sustain_policy=args.multi_guitar_sustain_policy,
+        )
         return
 
     res = parse_songsterr(args.data)

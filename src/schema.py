@@ -553,6 +553,7 @@ def default_guitar_request(
     sustain_policy: str = "preserve", quantization: str = "auto",
     technique_mode: str = "off", seed: int = 42,
     neural_score_weight: float = 1.0, neural_score_temperature: float = 1.0,
+    arrangement_mode: str = "minimum",
 ) -> dict[str, Any]:
     """§16's typed request object. Every field here is READ by at least one
     real code path (midi_infer.py / multi_guitar.py / constraints.py) -- none
@@ -567,7 +568,15 @@ def default_guitar_request(
     =0` disables the neural term outright without needing to omit the model.
     No effect at all (read, but multiplied against nothing) when no trained
     scorer is in play, which is every checkpoint that exists in this repo
-    today."""
+    today.
+
+    `arrangement_mode` (hardening pass §3): "minimum" (default, matches
+    every pre-hardening-pass caller's behavior exactly) | "preserve" |
+    "arrange" -- see `constraints.MultiGuitarCostConfig`/
+    `multi_guitar.auto_select_guitar_count` for the full behavioral
+    description. `sustain_policy` (hardening pass §12) now also accepts
+    "strict" and "practical" in addition to the original "preserve" default
+    -- see `multi_guitar._sustain_check`."""
     return {
         "guitar_count": guitar_count, "min_guitars": min_guitars, "max_guitars": max_guitars,
         "guitar_profiles": guitar_profiles or [default_guitar_profile()],
@@ -577,6 +586,7 @@ def default_guitar_request(
         "sustain_policy": sustain_policy, "quantization": quantization,
         "technique_mode": technique_mode, "seed": seed,
         "neural_score_weight": neural_score_weight, "neural_score_temperature": neural_score_temperature,
+        "arrangement_mode": arrangement_mode,
     }
 
 
@@ -590,6 +600,7 @@ def new_guitar_note(
     effects: dict[str, bool] | None = None, harmonic: dict[str, Any] | None = None,
     bend: dict[str, Any] | None = None, incoming_transition: dict[str, Any] | None = None,
     label_masks: dict[str, bool] | None = None,
+    source_part_id: "Any | None" = None, arrangement_role: "str | None" = None,
 ) -> dict[str, Any]:
     """A multi-guitar note: every field new_note() produces (so this is a
     valid input anywhere a schema-v2 note is -- gp5_export.py, tab_render.py,
@@ -603,7 +614,18 @@ def new_guitar_note(
     DIFFERENT concept from `source_note_id` (the note's permanent MIDI-import
     identity, set once and never reassigned) -- transition edges reference
     `id`/local position; source-note conservation validation references
-    `source_note_id`."""
+    `source_note_id`.
+
+    `source_part_id`/`arrangement_role` (hardening pass §4/§10/§23): purely
+    ADDITIVE, optional fields -- omitting them (the pre-hardening-pass
+    default) keeps every existing consumer unaffected. `source_part_id`
+    defaults to `source_track_id` when not given (today's normalized-"part"
+    concept, §4: one selected MIDI track == one candidate physical guitar
+    part; a future smarter grouping could diverge without a schema change).
+    `arrangement_role` is the heuristic bass/melody/inner_harmony label from
+    `multi_guitar.derive_role_hints`, purely informational/diagnostic --
+    never a hard constraint, never implies a different physical guitar
+    (§11: a musical voice/role is not automatically a separate instrument)."""
     note = new_note(
         note_id, time=notation_onset_tick, dur_ticks=notation_duration_tick,
         pitch=pitch, string=string, fret=fret, tuning=tuning, capo=capo,
@@ -614,12 +636,14 @@ def new_guitar_note(
     note.update({
         "source_note_id": source_note_id,
         "source_track_id": source_track_id,
+        "source_part_id": source_part_id if source_part_id is not None else source_track_id,
         "performance_onset_tick": performance_onset_tick,
         "performance_offset_tick": performance_offset_tick,
         "notation_onset_tick": notation_onset_tick,
         "notation_duration_tick": notation_duration_tick,
         "guitar_slot": guitar_slot,
         "assignment_confidence": assignment_confidence,
+        "arrangement_role": arrangement_role,
     })
     return note
 

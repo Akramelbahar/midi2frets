@@ -14,7 +14,7 @@ from model import (
     check_architecture_compatibility,
 )
 from inference import greedy_predict, beam_search_predict, sample_predict, predict_techniques
-from multi_guitar import auto_select_guitar_count, resolve_guitar_profiles, assign_voices
+from multi_guitar import auto_select_guitar_count, resolve_guitar_profiles, assign_voices, derive_role_hints
 from notation_quantizer import quantize_notes
 from parser import TPQ, STANDARD_TUNING
 from tab_render import render_tab
@@ -250,6 +250,16 @@ def import_midi_notes(
 
             raw_notes.append({
                 "source_note_id": next_id, "source_track_id": track_idx,
+                # Hardening pass §4: source_part_id is the normalized "part"
+                # identity used by preserve-mode continuity scoring. Today it
+                # is exactly the MIDI track index (one selected track == one
+                # candidate physical guitar part) -- kept as its own named
+                # field (not just an alias read off source_track_id
+                # everywhere) so a smarter grouping (e.g. merging tracks that
+                # share channel+program but were split for DAW convenience)
+                # could be introduced later without touching every call site
+                # that reads "part identity" today.
+                "source_part_id": track_idx,
                 "pitch": int(n.pitch), "velocity": int(n.velocity),
                 "performance_onset_tick": onset, "performance_offset_tick": offset,
             })
@@ -633,11 +643,13 @@ def assign_role_names(guitar_tracks: list[dict]) -> None:
 def run_multi_guitar_pipeline(
     midi_path: str, request: dict | None = None, assign_roles: bool = False,
     model: "GuitarStringTransformer | None" = None, trained_heads: dict[str, bool] | None = None,
-    device: "torch.device | None" = None,
+    device: "torch.device | None" = None, debug: bool = False,
 ) -> dict:
     """§3's full non-technique pipeline, wired together. `request` is
     layered onto schema.default_guitar_request() (§16's typed settings
-    object) -- pass only the fields you want to override.
+    object) -- pass only the fields you want to override, including the
+    hardening pass's `arrangement_mode` ("minimum" | "preserve" | "arrange")
+    and `sustain_policy` ("strict" | "preserve" | "practical").
 
     `model`/`trained_heads`: item 11 -- when given AND
     `trained_heads.get("candidate_scorer")` is true, the decoder's search is
@@ -647,6 +659,13 @@ def run_multi_guitar_pipeline(
     trained_heads) to use the decoder's heuristic costs alone -- the
     default, and the only behavior ever exercised by a real checkpoint in
     this repo today.
+
+    `debug`: hardening pass §20 -- when True, `diagnostics["stats"]` carries
+    the full search-statistics dict (nodes explored, candidates considered,
+    constraint rejections, dominance-pruned beam count, arrangement mode,
+    etc.) for debugging/future candidate-scorer training data. Always
+    computed either way (cheap); this flag only controls whether it's
+    included in the returned document, keeping normal output uncluttered.
 
     Returns a schema.build_multi_guitar_song() document. Every input note
     (after import policies are applied -- see import_midi_notes) appears
@@ -665,7 +684,15 @@ def run_multi_guitar_pipeline(
         unplayable_policy=req["unplayable_policy"],
         short_note_policy=req["short_note_policy"],
         duplicate_note_policy=req["duplicate_note_policy"],
-        sustain_policy=req["sustain_policy"],
+        # NOTE: import_midi_notes' own `sustain_policy` import-time policy
+        # ("preserve"|"allow_truncate", currently unused internally -- a
+        # pre-existing gap, not introduced by this pass) is a DIFFERENT
+        # concept from `req["sustain_policy"]` (the hardening pass §12
+        # DECODE-time tri-state policy: "strict"|"preserve"|"practical",
+        # enforced by multi_guitar._sustain_check). Deliberately NOT passed
+        # through here to avoid feeding a decode-level value into an
+        # unrelated import-level field; left at import_midi_notes' own
+        # default.
     )
     notes = import_result["notes"]
     if not notes:
@@ -702,12 +729,18 @@ def run_multi_guitar_pipeline(
 
     # §6: pass the FULL configured profile pool (not just profile 0) so a
     # multi-tuning request (e.g. Standard + Drop-D) decodes guitar 1's
-    # candidates against Drop-D, not a Standard-tuned copy.
+    # candidates against Drop-D, not a Standard-tuned copy. §7: pass the
+    # real tempo map so hand-shift feasibility/cost is tempo-aware (falls
+    # back to tempo-blind beats only if the MIDI genuinely had none). §3:
+    # arrangement_mode drives both the search strategy (auto_select_
+    # guitar_count) and the soft-cost weights (decode_song) together.
     decode_result = auto_select_guitar_count(
         notes, req["guitar_profiles"], min_guitars=req["min_guitars"], max_guitars=req["max_guitars"],
         playability_profile=req["playability_profile"], quality=req["quality"],
         sustain_policy=req["sustain_policy"], fixed_guitar_count=fixed_k,
         note_scores_factory=note_scores_factory,
+        tempo_events=import_result["timeline"].get("tempo_events"),
+        arrangement_mode=req.get("arrangement_mode", "minimum"),
     )
 
     notes_by_id = {n["source_note_id"]: n for n in notes}
@@ -718,19 +751,30 @@ def run_multi_guitar_pipeline(
     # used to SCORE its candidates during decoding.
     profiles = resolve_guitar_profiles(req["guitar_profiles"], K)
 
+    # §10: heuristic bass/melody/inner-harmony labels, purely informational
+    # -- attached to the exported notes as `arrangement_role` (diagnostic/
+    # future-training-signal use only, §11: never implies a different
+    # physical guitar).
+    role_hints = derive_role_hints(notes) if decode_result.feasible else {}
+
     guitar_notes: dict[int, list[dict]] = {g: [] for g in range(K)}
     if decode_result.feasible:
         for sid, (g, s, fret, voice) in decode_result.assignments.items():
             n = notes_by_id[sid]
             p = profiles[g]
+            # §12: apply any sustain-policy shortening decided during
+            # decode -- always traceable via decode_result.note_shortenings
+            # (and the matching SUSTAIN_SHORTENED diagnostic), never silent.
+            dur = decode_result.note_shortenings.get(sid, n["notation_duration_tick"])
             gnote = S.new_guitar_note(
                 len(guitar_notes[g]), source_note_id=sid, source_track_id=n["source_track_id"],
+                source_part_id=n.get("source_part_id", n["source_track_id"]),
                 pitch=n["pitch"], string=s, fret=fret, tuning=p["tuning"], capo=p.get("capo", 0),
                 velocity=n.get("velocity", 95),
                 performance_onset_tick=n["performance_onset_tick"],
                 performance_offset_tick=n["performance_offset_tick"],
-                notation_onset_tick=n["notation_onset_tick"], notation_duration_tick=n["notation_duration_tick"],
-                guitar_slot=g, voice=voice,
+                notation_onset_tick=n["notation_onset_tick"], notation_duration_tick=dur,
+                guitar_slot=g, voice=voice, arrangement_role=role_hints.get(sid),
                 # This decoder is a hard-constraint solver, not a probabilistic
                 # model -- every returned assignment already satisfies every
                 # hard constraint, so 1.0 reflects "constraint-valid", not a
@@ -766,6 +810,9 @@ def run_multi_guitar_pipeline(
         "import_diagnostics": import_result["diagnostics"],
         "guitar_count_searched": K,
         "guitar_count_requested": guitar_count,
+        "arrangement_mode": req.get("arrangement_mode", "minimum"),
+        "search_status": decode_result.search_status,
+        "notes_shortened": len(decode_result.note_shortenings),
         # Release-blocker pass, item 2/3: the returned guitar count is a
         # PROVEN minimum only when minimum_guitar_count_proven is True --
         # see multi_guitar.DecodeResult's docstring. Never inferred/omitted
@@ -775,6 +822,8 @@ def run_multi_guitar_pipeline(
         "feasible_upper_bound": decode_result.feasible_upper_bound,
         "unresolved_lower_counts": decode_result.unresolved_lower_counts,
     }
+    if debug:
+        diagnostics["stats"] = decode_result.stats
     song = S.build_multi_guitar_song(
         req, import_result["timeline"], import_result["source_tracks"], guitar_tracks, diagnostics,
     )
@@ -808,9 +857,17 @@ def _run_multi_guitar_cli(args) -> None:
         print(f"Loaded {args.checkpoint} | candidate_scorer trained: "
               f"{bool(trained_heads.get('candidate_scorer'))}")
 
+    # §24: --search-mode is the new preferred name (matches the spec's
+    # "fast/balanced/best/exact" terminology exactly); --decode-quality is
+    # kept as a working alias for backward compatibility. If the user
+    # touched --search-mode, it wins; otherwise --decode-quality's value
+    # (which defaults to "balanced" either way) is used.
+    quality = args.search_mode if args.search_mode is not None else args.decode_quality
+
     request = {
         "guitar_count": guitar_count, "min_guitars": args.min_guitars, "max_guitars": args.max_guitars,
-        "playability_profile": args.playability, "quality": args.decode_quality,
+        "playability_profile": args.playability, "quality": quality,
+        "arrangement_mode": args.arrangement_mode, "sustain_policy": args.sustain_policy,
     }
     if guitar_profiles:
         request["guitar_profiles"] = guitar_profiles
@@ -819,12 +876,15 @@ def _run_multi_guitar_cli(args) -> None:
         args.midi, request=request, assign_roles=args.assign_roles,
         model=model, trained_heads=trained_heads,
         device=torch.device(args.device) if model is not None else None,
+        debug=args.debug,
     )
 
     diag = song["diagnostics"]
+    print(f"Arrangement mode: {diag.get('arrangement_mode')} | search mode: {quality}"
+          f" | sustain policy: {args.sustain_policy}")
     print(f"Guitar count searched: {diag.get('guitar_count_searched')} "
           f"(requested: {diag.get('guitar_count_requested')})")
-    print(f"Decode feasible: {diag.get('decode_feasible')}")
+    print(f"Decode feasible: {diag.get('decode_feasible')} (status: {diag.get('search_status')})")
     # Release-blocker pass, item 3: never claim a proven minimum unless it
     # actually is one.
     if diag.get("minimum_guitar_count_proven"):
@@ -835,6 +895,9 @@ def _run_multi_guitar_cli(args) -> None:
         if diag.get("unresolved_lower_counts"):
             print(f"  unresolved lower count(s) -- search ran out of budget, not proven infeasible: "
                   f"{diag['unresolved_lower_counts']}")
+    if diag.get("notes_shortened"):
+        print(f"Notes shortened by sustain_policy={args.sustain_policy!r}: {diag['notes_shortened']} "
+              f"(see decode diagnostics for which -- SUSTAIN_SHORTENED)")
     if diag.get("conservation_errors"):
         print(f"WARNING: {len(diag['conservation_errors'])} source-note conservation error(s): "
               f"{diag['conservation_errors'][:5]}")
@@ -842,6 +905,8 @@ def _run_multi_guitar_cli(args) -> None:
         print(f"Decode diagnostics ({len(diag['decode_diagnostics'])}):")
         for d in diag["decode_diagnostics"][:20]:
             print(f"  - {d['code']}: {d['message']}")
+    if args.debug and diag.get("stats"):
+        print(f"Search stats: {diag['stats']}")
 
     if not song["guitar_tracks"] or not any(gt["notes"] for gt in song["guitar_tracks"]):
         print("No guitar tracks with notes to export -- skipping .gp5 write.")
@@ -919,8 +984,25 @@ def main():
     parser.add_argument("--max-guitars", type=int, default=8)
     parser.add_argument("--playability", default="balanced", choices=["easy", "balanced", "expert"],
                         help="constraints.PLAYABILITY_PRESETS entry governing hard/soft fingering constraints")
-    parser.add_argument("--decode-quality", default="balanced", choices=["fast", "balanced", "best"],
-                        help="multi_guitar.QUALITY_PRESETS entry trading search breadth for speed")
+    parser.add_argument("--decode-quality", default="balanced", choices=["fast", "balanced", "best", "exact"],
+                        help="[deprecated alias for --search-mode, kept for backward compatibility] "
+                             "multi_guitar.QUALITY_PRESETS entry trading search breadth for speed")
+    parser.add_argument("--search-mode", default=None, choices=["fast", "balanced", "best", "exact"],
+                        help="Hardening pass §13/§14: search-EFFORT preset (independent of --arrangement-mode). "
+                             "'exact' is a much larger but still bounded search -- slower by design. "
+                             "Takes priority over --decode-quality when both are given.")
+    parser.add_argument("--arrangement-mode", default="minimum", choices=["minimum", "preserve", "arrange"],
+                        help="Hardening pass §3: the MUSICAL-OBJECTIVE axis, independent of --search-mode and "
+                             "--playability. 'minimum' (default, matches all prior behavior): fewest guitars "
+                             "satisfying every hard constraint. 'preserve': strongly keep each source MIDI "
+                             "track/part on its own physical guitar. 'arrange': redistribute for the best "
+                             "musical result (continuity, register, role, balance) even if that costs an "
+                             "extra guitar or two.")
+    parser.add_argument("--sustain-policy", default="preserve", choices=["strict", "preserve", "practical"],
+                        help="Hardening pass §12: 'strict' never shortens a sustaining note (may force more "
+                             "guitars). 'preserve' (default) allows only small, bounded re-articulation. "
+                             "'practical' allows re-articulation whenever needed to avoid an extra guitar. "
+                             "Every shortening is reported in decode diagnostics (SUSTAIN_SHORTENED), never silent.")
     parser.add_argument("--guitar-tuning", nargs=6, type=int, action="append", default=None,
                         help="One guitar's 6-string tuning (MIDI pitches, high to low), e.g. "
                              "--guitar-tuning 64 59 55 50 45 40. Repeat for multiple distinct guitars "
@@ -931,6 +1013,10 @@ def main():
                         help="If --checkpoint has a trained candidate_scorer head, use it (item 11) to "
                              "additionally guide the decoder's search on top of its heuristic costs. "
                              "Never bypasses a hard physical constraint either way; safe to leave off.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Hardening pass §20: print search statistics (nodes explored, candidates "
+                             "considered, constraint rejections, dominance-pruned beams, etc.) alongside the "
+                             "normal summary. Off by default to keep ordinary CLI output uncluttered.")
     args = parser.parse_args()
 
     if args.multi_guitar:

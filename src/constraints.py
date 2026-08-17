@@ -81,12 +81,29 @@ class PlayabilityProfile:
     the hard constraints (max_chord_span_frets gates whether a chord is
     legal at all on one guitar) and the soft decoder costs (the *_weight
     fields) -- profiles never remove notes, only change what counts as a
-    legal/preferred fingering."""
+    legal/preferred fingering.
+
+    `max_hand_shift_per_beat`: the ORIGINAL tempo-BLIND hand-shift cap, in
+    fret-distance per musical beat (960 ticks), used whenever no real tempo
+    map is available to the decoder -- kept for backward compatibility
+    (every pre-hardening-pass call site and test uses this). `
+    max_hand_shift_frets_per_second`: the NEW tempo-AWARE cap (hardening
+    pass §7) -- "one beat" at 60 BPM (1 real second) and "one beat" at 200
+    BPM (0.3 real seconds) give a guitarist very different amounts of time
+    to move, which a purely tick/beat-based cap can never see. When
+    `multi_guitar.decode_song` is given a real tempo map (§7), it converts
+    elapsed ticks to elapsed SECONDS and enforces this field instead;
+    without a tempo map it falls back to the beat-based field exactly as
+    before. Default derived to roughly match the beat-based default at a
+    nominal 120 BPM (0.5s/beat: 7 frets/beat / 0.5s = 14 frets/sec) so a
+    caller who starts passing a tempo map doesn't see a sudden behavior
+    swing at that common tempo."""
     name: str = "balanced"
     max_chord_span_frets: int = 5
     max_preferred_fret: int = 17
     absolute_max_fret: int = 24
     max_hand_shift_per_beat: int = 7
+    max_hand_shift_frets_per_second: float = 14.0
     allow_barre: bool = True
     allow_open_strings: bool = True
     open_string_preference: float = 0.0
@@ -95,6 +112,19 @@ class PlayabilityProfile:
     string_crossing_weight: float = 0.3
     source_track_coherence_weight: float = 0.5
     guitar_switch_weight: float = 0.5
+    # §5/§6 hardening pass: the max simultaneous fretted-note count the
+    # deterministic fingering CSP (fingering.py) will accept, with barre
+    # use governed by `allow_barre` above. 4 = four fretting fingers, the
+    # anatomical default; not expected to change per-preset today, but
+    # kept here (not hard-coded in fingering.py) so a profile COULD model
+    # e.g. a thumb-over-the-neck extra "finger" later without touching the
+    # CSP itself.
+    max_fingers: int = 4
+    # §8 hardening pass: soft-cost weight for the fingering CSP's
+    # `difficulty` score (barre use, finger count, fret spread) -- separate
+    # from chord_stretch_weight, which only measures raw fret span and
+    # knows nothing about barres or finger count.
+    finger_difficulty_weight: float = 0.4
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -103,12 +133,16 @@ class PlayabilityProfile:
 PLAYABILITY_PRESETS: dict[str, PlayabilityProfile] = {
     "easy": PlayabilityProfile(
         name="easy", max_chord_span_frets=4, max_preferred_fret=12, max_hand_shift_per_beat=4,
+        max_hand_shift_frets_per_second=8.0,
         hand_shift_weight=1.5, chord_stretch_weight=3.0, open_string_preference=0.5,
+        finger_difficulty_weight=0.6,
     ),
     "balanced": PlayabilityProfile(name="balanced"),
     "expert": PlayabilityProfile(
         name="expert", max_chord_span_frets=6, max_preferred_fret=22, max_hand_shift_per_beat=12,
+        max_hand_shift_frets_per_second=22.0,
         hand_shift_weight=0.5, chord_stretch_weight=1.0, string_crossing_weight=0.15,
+        finger_difficulty_weight=0.2,
     ),
 }
 
@@ -225,3 +259,112 @@ def strings_are_unique(strings: list[int]) -> bool:
     """Hard constraint: a guitar cannot attack two notes on the same string
     at the same instant."""
     return len(strings) == len(set(strings))
+
+
+def event_is_fingerable(string_fret_pairs: list[tuple[int, int]], profile: PlayabilityProfile) -> bool:
+    """§5/§6 hardening pass: the REAL hard-constraint check that supersedes
+    `event_fits_barre_rule` above for correctness purposes -- delegates to
+    `fingering.py`'s deterministic finger-assignment CSP, which (unlike the
+    old same-fret-only proxy) also rejects shapes that need more than
+    `profile.max_fingers` fingers even when every fret is distinct (e.g. 5
+    simultaneous different-fret notes on 5 different strings, which the old
+    checks -- unique strings + chord span -- never caught). `
+    event_fits_barre_rule` is kept unchanged for backward compatibility
+    (existing callers/tests reference it directly), but `multi_guitar.py`'s
+    decoder now runs THIS check as an additional hard filter, strictly more
+    restrictive (every shape this rejects, the old checks would have wrongly
+    accepted; every shape the old checks reject, this rejects too -- see
+    `tests/test_fingering.py` and `tests/test_multi_guitar_hardening.py`)."""
+    import fingering
+    return fingering.event_is_fingerable(string_fret_pairs, allow_barre=profile.allow_barre, max_fingers=profile.max_fingers)
+
+
+# =========================================================================== #
+# Multi-guitar ARRANGEMENT scoring configuration (§18 of the hardening pass)
+#
+# Kept deliberately SEPARATE from PlayabilityProfile (physical/fingering
+# feasibility: easy/balanced/expert) and from multi_guitar.QUALITY_PRESETS
+# (search effort: fast/balanced/best/exact) -- this dataclass is the THIRD,
+# independent axis: what MUSICAL OBJECTIVE the solver is optimizing for
+# (minimum/preserve/arrange, §3). Mixing these three concerns into one
+# object was explicitly the thing §18 asked NOT to do ("the search preset
+# and musical objective must be separate concepts").
+#
+# All fields default to values that make "minimum" mode mathematically
+# IDENTICAL to the pre-hardening-pass decoder: every new weight introduced
+# here is 0.0 under the "minimum" preset, so decode_song(..., cost_config=
+# None) (the default) and decode_song(..., cost_config=MultiGuitarCostConfig.
+# for_mode("minimum")) produce byte-identical costs -- this is what makes
+# the whole hardening pass backward-compatible rather than a silent
+# behavior change for every existing caller.
+# =========================================================================== #
+
+
+@dataclass(frozen=True)
+class MultiGuitarCostConfig:
+    """§18: one place for every ARRANGEMENT (musical-objective) soft-cost
+    weight, instead of scattering new magic numbers across multi_guitar.py.
+    `mode` also changes non-cost SEARCH BEHAVIOR in multi_guitar.py (e.g.
+    `preserve`'s starting K, `arrange`'s multi-K quality comparison) -- see
+    `docs/ARCHITECTURE.md`'s arrangement-modes section for the full
+    behavioral description, not just the weights below."""
+    mode: str = "minimum"
+
+    # --- §4/§9: source-part / continuity weights -------------------------
+    # Multiplier applied ON TOP OF PlayabilityProfile's own
+    # source_track_coherence_weight/guitar_switch_weight -- "preserve" wants
+    # these to dominate the decision much more strongly than "minimum"'s
+    # mild tie-breaking preference.
+    preservation_multiplier: float = 1.0
+    # Extra penalty for assigning a note to a guitar OTHER than the one its
+    # source_part_id would "naturally" own (§4) -- 0 unless in preserve mode.
+    wrong_preferred_guitar_weight: float = 0.0
+    # §9: register/pitch-trajectory continuity -- penalizes a note landing
+    # on a different guitar than its immediate predecessor when the pitch
+    # trajectory is smooth (a phrase that could obviously have stayed on
+    # one guitar shouldn't hop for no reason).
+    register_continuity_weight: float = 0.0
+    # §10: bonus for keeping a note's heuristic musical role (bass/melody/
+    # inner harmony, see `multi_guitar.derive_role_hints`) on the same
+    # guitar it was recently on.
+    role_continuity_weight: float = 0.0
+    # §9: balance note count across USED guitars in "arrange" mode -- never
+    # forces silence away from a genuinely monophonic passage (only applies
+    # when multiple guitars are already carrying real material).
+    guitar_balance_weight: float = 0.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+ARRANGEMENT_MODE_PRESETS: dict[str, MultiGuitarCostConfig] = {
+    "minimum": MultiGuitarCostConfig(mode="minimum"),
+    "preserve": MultiGuitarCostConfig(
+        mode="preserve", preservation_multiplier=8.0, wrong_preferred_guitar_weight=6.0,
+        register_continuity_weight=0.0, role_continuity_weight=0.0, guitar_balance_weight=0.0,
+    ),
+    "arrange": MultiGuitarCostConfig(
+        mode="arrange", preservation_multiplier=1.0, wrong_preferred_guitar_weight=0.0,
+        register_continuity_weight=0.5, role_continuity_weight=0.3, guitar_balance_weight=0.2,
+    ),
+}
+
+
+def get_multi_guitar_cost_config(spec: "str | dict | MultiGuitarCostConfig | None") -> MultiGuitarCostConfig:
+    """Same accepted-shapes convention as `get_playability_profile`: a
+    preset name, an explicit config, a dict of overrides layered onto its
+    named preset (or "minimum" if unnamed), or None (-> the "minimum"
+    preset, which is a cost-neutral no-op relative to pre-hardening-pass
+    behavior)."""
+    if spec is None:
+        return ARRANGEMENT_MODE_PRESETS["minimum"]
+    if isinstance(spec, MultiGuitarCostConfig):
+        return spec
+    if isinstance(spec, dict):
+        base_name = spec.get("mode", "minimum")
+        base = ARRANGEMENT_MODE_PRESETS.get(base_name, ARRANGEMENT_MODE_PRESETS["minimum"])
+        return replace(base, **spec)
+    if spec in ARRANGEMENT_MODE_PRESETS:
+        return ARRANGEMENT_MODE_PRESETS[spec]
+    raise ValueError(f"unknown arrangement mode {spec!r}; choose from {list(ARRANGEMENT_MODE_PRESETS)} "
+                      f"or pass a dict of overrides / a MultiGuitarCostConfig instance")

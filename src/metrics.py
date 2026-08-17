@@ -563,6 +563,122 @@ def multi_guitar_export_reparse_preservation(song: dict[str, Any]) -> dict[str, 
     }
 
 
+# =========================================================================== #
+# Multi-guitar hardening pass, §22: metrics NOT already covered above by
+# source_note_coverage/hard_constraint_violation_rate/chord_stretch_
+# distribution/hand_movement_stats/track_fragmentation -- see this module's
+# existing multi-guitar section (source_note_coverage onward) for those; the
+# spec's other requested metrics (note preservation rate, physical-validity
+# rate, guitar count, source-part fragmentation, average/max fret movement,
+# average chord span) are already reported by those functions under
+# slightly different names, so are NOT duplicated here (§27: never duplicate
+# scoring/metric logic across files).
+# =========================================================================== #
+
+def guitar_switch_count(guitar_tracks: list[dict[str, Any]]) -> dict[str, Any]:
+    """§22: how many times, across a source part's notes in onset order, the
+    assigned `guitar_slot` changes from the immediately preceding note of
+    that SAME source part -- what PlayabilityProfile.guitar_switch_weight
+    (and, more strongly, "preserve" mode) is trying to minimize, measured
+    directly rather than only as a cost. Distinct from `track_fragmentation`
+    (which counts how many DISTINCT guitars a part ever touches, ignoring
+    order) -- a part that goes guitar0 -> guitar1 -> guitar0 -> guitar1
+    touches only 2 guitars (fragmentation=2) but switches 3 times."""
+    by_part: dict[Any, list[tuple[int, int]]] = {}
+    for gt in guitar_tracks:
+        for n in gt["notes"]:
+            part = n.get("source_part_id", n.get("source_track_id"))
+            onset = n.get("notation_onset_tick", n.get("time", 0))
+            by_part.setdefault(part, []).append((onset, gt["guitar_slot"]))
+
+    total_switches = 0
+    per_part: dict[str, int] = {}
+    for part, events in by_part.items():
+        events.sort(key=lambda e: e[0])
+        switches = sum(1 for i in range(1, len(events)) if events[i][1] != events[i - 1][1])
+        per_part[str(part)] = switches
+        total_switches += switches
+    return {"total_switches": total_switches, "per_source_part": per_part}
+
+
+def difficult_chord_count(guitar_tracks: list[dict[str, Any]], playability_profile: Any = "balanced", difficulty_threshold: float = 4.0) -> dict[str, Any]:
+    """§22: how many simultaneous-per-guitar events are "difficult" under
+    the deterministic fingering CSP (fingering.py) -- difficulty combines
+    finger count, barre use, and fret spread (see FingeringResult.difficulty
+    for the exact formula); `difficulty_threshold` defaults to roughly "a
+    4-finger shape or a barre," a reasonable line between ordinary and
+    effortful without being a hard pass/fail on playability (that's what
+    hard_constraint_violation_rate is for)."""
+    import fingering
+    from constraints import get_playability_profile
+
+    profile = get_playability_profile(playability_profile)
+    events: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for gt in guitar_tracks:
+        for n in gt["notes"]:
+            key = (gt["guitar_slot"], n.get("notation_onset_tick", n.get("time", 0)))
+            events.setdefault(key, []).append(n)
+
+    total = len(events)
+    difficult = 0
+    barre_count = 0
+    for notes in events.values():
+        pairs = [(n["string"], n["fret"]) for n in notes]
+        result = fingering.assign_fingering(pairs, allow_barre=profile.allow_barre, max_fingers=profile.max_fingers)
+        if result.uses_barre:
+            barre_count += 1
+        if result.feasible and result.difficulty >= difficulty_threshold:
+            difficult += 1
+    return {
+        "difficult_chord_count": difficult, "difficult_chord_rate": difficult / total if total else 0.0,
+        "barre_chord_count": barre_count, "events_checked": total,
+    }
+
+
+def search_exhaustion_rate(decode_diagnostics: list[dict[str, Any]]) -> dict[str, Any]:
+    """§22: fraction of a decode's diagnostics that are SEARCH_EXHAUSTED
+    (search incomplete -- node budget, candidate pre-pruning, or beam
+    pruning, §13/§14) versus a genuine hard-constraint diagnosis (e.g.
+    CHORD_SPAN_EXCEEDED, NO_LEGAL_FRETBOARD_CANDIDATE). `decode_diagnostics`
+    is `DecodeResult.diagnostics_dicts()` (or the `decode_diagnostics` list
+    already carried in a multi_guitar_song document's `diagnostics`).
+    A high rate is a real signal to retry with a higher quality/search
+    preset (up to "exact") before trusting a reported infeasibility."""
+    if not decode_diagnostics:
+        return {"search_exhaustion_rate": 0.0, "exhausted_count": 0, "total_diagnostics": 0}
+    exhausted = sum(1 for d in decode_diagnostics if d.get("code") == "SEARCH_EXHAUSTED")
+    return {
+        "search_exhaustion_rate": exhausted / len(decode_diagnostics),
+        "exhausted_count": exhausted, "total_diagnostics": len(decode_diagnostics),
+    }
+
+
+def arrangement_quality_report(
+    song: dict[str, Any], input_source_note_ids: list[int], playability_profile: Any = "balanced",
+) -> dict[str, Any]:
+    """§22: a single convenience aggregator combining the metrics a caller
+    comparing OLD vs NEW solver behavior (or one arrangement_mode against
+    another) most likely wants in one call, reusing every existing function
+    rather than recomputing anything (§27). Not a replacement for calling
+    the individual functions directly when only one number is needed."""
+    guitar_tracks = song.get("guitar_tracks", [])
+    diag = song.get("diagnostics", {})
+    report = {
+        "note_preservation": source_note_coverage(input_source_note_ids, guitar_tracks),
+        "duplicate_output_rate": duplicate_output_rate(guitar_tracks),
+        "hard_constraint_violations": hard_constraint_violation_rate(guitar_tracks, playability_profile),
+        "guitar_count": len({gt["guitar_slot"] for gt in guitar_tracks if gt["notes"]}),
+        "chord_stretch": chord_stretch_distribution(guitar_tracks),
+        "hand_movement": hand_movement_stats(guitar_tracks),
+        "track_fragmentation": track_fragmentation(guitar_tracks),
+        "guitar_switches": guitar_switch_count(guitar_tracks),
+        "difficult_chords": difficult_chord_count(guitar_tracks, playability_profile),
+        "search_exhaustion": search_exhaustion_rate(diag.get("decode_diagnostics", [])),
+        "notes_shortened_by_sustain_policy": diag.get("notes_shortened", 0),
+    }
+    return report
+
+
 if __name__ == "__main__":
     import sys
     from parser import parse_songsterr
