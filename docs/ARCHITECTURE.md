@@ -1,9 +1,9 @@
 # midi2Frets architecture and file reference
 
-Status snapshot: 2026-08-17 (multi-guitar architecture pass plus two follow-up correction passes, uncommitted)
-Schema: version 3 (additive multi-guitar envelope: `document_type: "multi_guitar_song"`, alongside the unchanged per-track `build_song_schema()` envelope)
-Architecture version: 5 (model.ARCHITECTURE_VERSION)
-Scope: the repository as it exists now, including this session's multi-guitar changes on top of the prior technique-model session (§§1-9 below describe that earlier, still-current single-guitar technique architecture; §10 describes what this session added on top of it)
+Status snapshot: 2026-08-17 (multi-guitar architecture pass, two follow-up correction passes, a release-blocker pass, and a HARDENING pass -- §10.15 -- all uncommitted)
+Schema: version 3 (additive multi-guitar envelope: `document_type: "multi_guitar_song"`, alongside the unchanged per-track `build_song_schema()` envelope; the hardening pass added optional `source_part_id`/`arrangement_role` note fields, purely additive, no version bump needed)
+Architecture version: 5 (model.ARCHITECTURE_VERSION -- unchanged by the hardening pass, which touched no `nn.Module`)
+Scope: the repository as it exists now, including this session's multi-guitar changes on top of the prior technique-model session (§§1-9 below describe that earlier, still-current single-guitar technique architecture; §10 describes the multi-guitar system, ending with §10.15's hardening pass -- read that subsection for what's current)
 
 ## 1. What the project currently does
 
@@ -348,14 +348,15 @@ The MIDI path (`midi_infer.py::main`) now passes the FULL tempo/time-signature e
 | `src/evaluate.py` | Checkpoint versus ground truth/baseline CLI. | Evaluates string assignment AND (when any technique head is trained) technique quality via `metrics.py`'s new functions. |
 | `src/fetch_songsterr.py` | Songsterr data discovery/downloading helper. | Corpus acquisition utility. |
 | `src/extract_har.py` | Extracts Songsterr track JSON from HAR captures. | Offline dataset acquisition utility. |
-| `src/multi_guitar.py` | **(§10, new)** Structured CSP + temporal beam-search multi-guitar decoder. | Non-neural: `decode_song`/`auto_select_guitar_count` partition notes across the minimum feasible guitar count under hard physical constraints. |
-| `src/notation_quantizer.py` | **(§10, new)** Timeline-aware notation quantization. | Fills `notation_onset_tick`/`notation_duration_tick`/measure/beat fields from raw performance timing. |
+| `src/multi_guitar.py` | **(§10)** Structured CSP + temporal beam-search multi-guitar decoder. | Non-neural: `decode_song`/`auto_select_guitar_count` partition notes across the minimum feasible guitar count under hard physical constraints (§10.15: now also arrangement-mode-aware, tempo-aware, sustain-policy-aware, dominance-pruned). |
+| `src/notation_quantizer.py` | **(§10)** Timeline-aware notation quantization. | Fills `notation_onset_tick`/`notation_duration_tick`/measure/beat fields from raw performance timing; §10.15 added `ticks_to_seconds` for tempo-aware scoring. |
+| `src/fingering.py` | **(§10.15, new)** Deterministic left-hand fingering/chord-shape CSP. | `assign_fingering`/`event_is_fingerable`: exact 4-finger(+barre) feasibility check, cached by normalized chord shape -- see §10.15.3. |
 
 See §10 for the full multi-guitar architecture description (schema/constraints/midi_infer/gp5_export/model/train/dataset/preprocess_gp/metrics/evaluate were all EXTENDED, not replaced, for multi-guitar support -- §10.8 lists exactly what changed in each).
 
 ### Tests
 
-337 tests across 27 files (159 across 15 files before the first multi-guitar pass; see §10.8-§10.13 for the multi-guitar test files, including `tests/test_multi_guitar_correction.py` (first correction pass), `tests/test_multi_guitar_correction_2.py` (second correction pass), and `tests/test_multi_guitar_release_blocker.py` (third, release-blocker pass), and which existing files gained multi-guitar cases).
+384 tests across 30 files (337 across 27 files before the hardening pass, §10.15; 159 across 15 files before the first multi-guitar pass; see §10.8-§10.13 for the multi-guitar test files, including `tests/test_multi_guitar_correction.py` (first correction pass), `tests/test_multi_guitar_correction_2.py` (second correction pass), and `tests/test_multi_guitar_release_blocker.py` (third, release-blocker pass); §10.15 added `tests/test_fingering.py`, `tests/test_multi_guitar_hardening.py`, and `tests/test_metrics_hardening.py`).
 
 | File | Coverage |
 |---|---|
@@ -630,3 +631,98 @@ python src/evaluate.py --multi-guitar-midi input.mid --multi-guitar-max-guitars 
 # One command: MIDI in, multi-track GP5 out (§10.9 item 14)
 python src/midi_infer.py --midi input.mid --multi-guitar --multi-guitar-out output.gp5 --max-guitars 4
 ```
+
+### 10.15 Multi-guitar HARDENING pass (physical realism, arrangement modes, search modes, sustain policies)
+
+A fourth pass, explicitly scoped as "harden the existing hybrid architecture, do not replace it": every hard-constraint-then-soft-cost, CSP-then-beam-search structural decision from §§10.1-10.13 is unchanged in KIND -- this pass makes each layer more accurate and adds two new independent configuration axes (arrangement mode, search mode) on top, all backward-compatible by construction (see 10.15.9). No training, no preprocessing, no checkpoint/data changes.
+
+#### 10.15.1 The core principle, restated precisely
+
+> Hard constraints decide what is physically possible. Deterministic pitch->fret math guarantees fretboard validity. CSP/backtracking generates valid per-event assignments. Temporal beam search chooses arrangements across time. Learned/neural scoring may rank valid solutions, but must NEVER override hard physical constraints.
+
+Every change below fits into exactly one of those four layers; none of them replaces the layer above it with a model.
+
+#### 10.15.2 Three independent configuration axes (§18)
+
+Previously the decoder had two axes: `PlayabilityProfile` (physical feasibility: easy/balanced/expert) and `multi_guitar.QUALITY_PRESETS` (search effort: fast/balanced/best). This pass adds a THIRD, genuinely independent axis and extends the second:
+
+| Axis | Values | Governs | Object |
+|---|---|---|---|
+| Physical feasibility | easy / balanced / expert | What counts as a legal/preferred fingering (fret span, hand-shift rate, barre allowance, finger count) | `constraints.PlayabilityProfile` |
+| Search effort | fast / balanced / best / **exact** (new) | How hard the CSP+beam search tries before giving up (node budget, candidate cap, beam width) | `multi_guitar.QUALITY_PRESETS` |
+| **Arrangement mode (new)** | **minimum / preserve / arrange** | What "the best arrangement" MEANS -- fewest guitars, respecting source identity, or best musical result | `constraints.MultiGuitarCostConfig` / `ARRANGEMENT_MODE_PRESETS` |
+
+These three never leak into each other: a `MultiGuitarCostConfig` field never gates hard feasibility, and `quality`/`playability_profile` never change what "good" means, only how hard the search looks and what counts as legal.
+
+#### 10.15.3 Physical guitar vs. musical voice (§4/§11) -- the conceptual fix
+
+The single most important conceptual correction this pass makes: **a MIDI track is not automatically one physical guitar, and a musical voice within a track is not automatically a second physical guitar either.** One real fingerstyle guitar can contain a bass line, a melody, and chordal accompaniment simultaneously -- that's one instrument playing three musical roles, not three guitars.
+
+- `multi_guitar.assign_voices` (§10.9 item 12) already only ever splits a SUSTAINING note from later attacks on OTHER strings of the SAME guitar into voice 0/1 -- it never creates a new guitar. This was already correct; this pass makes the distinction explicit in documentation and introduces the complementary concept below.
+- **New**: `source_part_id` (§4, `schema.new_guitar_note`, additive/optional field defaulting to `source_track_id`) is the normalized "which physical part does this note belong to" identity, deliberately named differently from raw MIDI track index so a smarter future grouping (e.g. merging tracks that share channel+program but were split across a DAW project for editing convenience) can be introduced without touching every call site that reads "part identity" today. Today it IS exactly the track index -- the field exists for the CONCEPT, not because a smarter heuristic has been built yet (an honest, documented scope limit, not a broken promise).
+- **New**: `multi_guitar.derive_role_hints` (§10) is a cheap per-event heuristic (lowest simultaneous pitch = bass, highest = melody, rest = inner harmony) attached to exported notes as `arrangement_role` -- purely informational/diagnostic, never a hard constraint, and explicitly NEVER used to justify splitting notes across physical guitars. This is the "lightweight musical-role reasoning" the spec asked for, deliberately NOT full music-theory understanding.
+
+#### 10.15.4 Arrangement modes (§3)
+
+`constraints.MultiGuitarCostConfig` (a frozen dataclass, `ARRANGEMENT_MODE_PRESETS["minimum"|"preserve"|"arrange"]`) holds every arrangement-objective soft-cost weight; `multi_guitar.decode_song`/`auto_select_guitar_count` accept `arrangement_mode: str` (or an explicit `cost_config` override) and change BOTH their search strategy and their soft costs:
+
+- **`minimum`** (default): unchanged behavior from §§10.1-10.13 -- ascending K search, first feasible K wins, fewest guitars satisfying every hard constraint. Every hardening-pass weight defaults to `0.0` under this preset, so `decode_song(..., cost_config=None)` (the old call signature) and `decode_song(..., arrangement_mode="minimum")` are mathematically IDENTICAL in cost -- this is what makes the whole pass backward-compatible (§10.15.9).
+- **`preserve`**: `auto_select_guitar_count` never starts its K search below the number of DISTINCT `source_part_id`s present (never collapses clearly-separate source guitar parts down to fewer guitars unless physical infeasibility genuinely forces it upward from there); `_soft_cost` multiplies the existing `source_track_coherence_weight`/`guitar_switch_weight` by `preservation_multiplier` (8x) and adds a new `wrong_preferred_guitar_weight` penalty (via `multi_guitar.build_preferred_guitar_map`, first-appearance-order part-to-guitar-slot assignment) for a note landing on a guitar other than its part's natural one -- catching the FIRST note of a part landing wrong, which the purely-sequential coherence cost can't see. Verified: `test_preserve_mode_keeps_each_source_part_on_its_own_guitar` shows 2 source parts stay on 2 separate guitars under "preserve" even though `test_minimum_mode_merges_onto_one_guitar_when_physically_valid` proves merging them onto 1 guitar is physically legal.
+- **`arrange`**: after finding the first feasible K0 (identical search to "minimum"), tries up to `arrange_search_margin` (default 2) additional LARGER K values and keeps whichever has the lowest notes-normalized cost (with a small per-extra-guitar penalty so a marginal improvement doesn't runaway-inflate the count) -- guitar count no longer strictly dominates. Also activates `register_continuity_weight` (penalize landing on a different guitar than one whose last note was pitch-close) and `role_continuity_weight` (small bonus for keeping a note's heuristic role, §10.15.3, on the guitar that was just playing that role) and `guitar_balance_weight` (mild nudge toward using less-loaded guitars, never forcing silence away from a genuinely monophonic passage). `DecodeResult.minimum_guitar_count_proven` is always False in this mode -- minimality was never the objective.
+
+Exposed via `--arrangement-mode {minimum,preserve,arrange}` on `midi_infer.py --multi-guitar` and `evaluate.py --multi-guitar-midi`.
+
+#### 10.15.5 The fingering/chord-shape CSP (§5/§6) -- a real hard-constraint upgrade
+
+The pre-hardening-pass barre check (`constraints.event_fits_barre_rule`) only asked "does this event need two DIFFERENT strings at the identical nonzero fret, with barre disallowed?" -- it never checked whether a shape needs MORE THAN FOUR FINGERS at all, even with every fret distinct (a 5-different-fret, 5-different-string chord passed every old hard check).
+
+New module `src/fingering.py`: `assign_fingering(string_fret_pairs, allow_barre, max_fingers=4) -> FingeringResult` is a small, exact, deterministic, LRU-cached CSP:
+- Fretted notes needing <= `max_fingers` fingers: always feasible, one dedicated finger each -- two notes at the SAME fret on different strings are just two ordinary fingers, NOT automatically a barre (the spec's explicit clarification).
+- More than `max_fingers` fretted notes: only feasible if a candidate barre (one finger flattened across a CONTIGUOUS string range at one shared fret) reduces the remaining individual-finger count to `max_fingers` or fewer. A barre's span is invalid if any OTHER note (fretted at a lower fret, OR OPEN -- both block a barre finger) lies on a string inside that span; a note on a covered string at a HIGHER fret is fine (a second finger presses on top).
+- `constraints.event_is_fingerable` wraps this as the new hard filter `multi_guitar.search_event_assignments` runs IN ADDITION TO (never instead of) the existing `chord_fits_span`/`event_fits_barre_rule` checks -- strictly MORE restrictive, so it can only reject shapes the old checks wrongly accepted, never accept something the old checks correctly rejected.
+- Cached by normalized (sorted, deduplicated) shape (`functools.lru_cache`) -- most songs reuse a handful of chord voicings constantly, so this costs one real CSP solve per DISTINCT shape, not one per occurrence (§26 performance requirement).
+- A real bug was caught and fixed by this module's OWN test suite during development: the barre-span-blocking check initially only looked at FRETTED notes, silently missing an OPEN string sitting inside a candidate barre's span (which should block it exactly like a low fretted note) -- see `test_barre_blocked_by_an_open_string_inside_its_span`.
+
+`PlayabilityProfile` gained `max_fingers` (default 4, anatomical) and `finger_difficulty_weight` (soft cost for the CSP's `difficulty` score -- finger count + barre-use penalty + fret spread) fields.
+
+#### 10.15.6 Tempo-aware hand movement (§7)
+
+The pre-hardening-pass hand-shift model measured elapsed time in TICKS/BEATS (`elapsed_ticks / tpq`) -- tempo-BLIND: "one beat" was treated identically whether the song is at 60 BPM (a full second to move) or 200 BPM (0.3 seconds). `notation_quantizer.ticks_to_seconds(tick, tempo_events, tpq)` (new) integrates real elapsed seconds across every tempo change in the song's timeline; `multi_guitar._elapsed_time`/`_hand_shift_allowance` use it when `tempo_events` is available (threaded through `decode_song`/`search_event_assignments`/`_backtrack_event`/`_soft_cost`, and from `midi_infer.run_multi_guitar_pipeline` via the MIDI's own real tempo map), falling back to the original tempo-blind beat-based calculation when it isn't (so every pre-hardening-pass caller that never passes a tempo map sees ZERO behavior change -- verified directly by `test_tempo_blind_fallback_unchanged_when_no_tempo_events_given`). `PlayabilityProfile.max_hand_shift_frets_per_second` (new field) is the tempo-aware equivalent of `max_hand_shift_per_beat`, both as a HARD cap during backtracking and the denominator of the soft hand-shift cost. Verified: `test_same_tick_gap_allows_more_movement_at_slower_tempo` shows the identical tick gap yields a larger allowance at 60 BPM than at 200 BPM.
+
+#### 10.15.7 Sustain policy tri-state (§12)
+
+MIDI note duration is not automatically "the guitarist must hold exactly this long." `multi_guitar._sustain_check` (new) replaces the old binary preserve/anything-goes check with three real policies, all still enforced as part of the HARD per-candidate feasibility check during backtracking (never a silent post-hoc edit):
+
+- **`strict`**: identical to the old `sustain_policy="preserve"` behavior -- a collision is a hard rejection, may force the search toward more guitars.
+- **`preserve`** (default, redefined more precisely): allows a SMALL bounded re-articulation (overlap <= min(an eighth note, 15% of the held note's duration)) -- a large collision still hard-rejects.
+- **`practical`**: always allows shortening the earlier note down to the new note's onset, as long as the result stays at or above a floor (`min_floor_ticks`, default 30, avoiding a near-silent sliver) -- prioritizes not needing an extra guitar over exact sustain fidelity.
+
+Every shortening actually applied on the WINNING decode path is: (1) recorded in `DecodeResult.note_shortenings` (`source_note_id -> new_duration_tick`), (2) given a matching `DecodeDiagnostic(code="SUSTAIN_SHORTENED")`, and (3) applied to the exported note's `notation_duration_tick` by `midi_infer.run_multi_guitar_pipeline` -- never silent, always traceable, matching §12's explicit requirement. `test_sustain_strict_forces_infeasible_on_single_guitar_where_practical_succeeds` demonstrates the same input decoding successfully under `practical` and failing under `strict` on one guitar. Exposed via `--sustain-policy {strict,preserve,practical}`.
+
+#### 10.15.8 Search completeness: explicit status, dominance pruning, "exact" tier (§13/§14/§15)
+
+- `DecodeResult.search_status` (new property): `"FEASIBLE"` / `"SEARCH_EXHAUSTED"` / `"PROVEN_INFEASIBLE"`, derived from the existing `feasible`/`search_exhausted` fields (no new independently-settable flag, so it can't disagree with them) -- the exact three-way distinction the spec asked for, now a single readable value instead of having to reason about two booleans together.
+- **`QUALITY_PRESETS["exact"]`** (new): a much larger but still FINITE budget (2M backtrack nodes, effectively-unbounded per-event candidate/beam caps) -- deliberately NOT a formal branch-and-bound/ILP solver (no heavyweight external dependency was introduced, per the spec's explicit "do not make this mandatory unless justified"); still honestly reports `SEARCH_EXHAUSTED` rather than claiming completeness it doesn't have. Measured on a real 2-source-track smoke MIDI: "exact" explored ~487K nodes vs. "balanced"'s low thousands -- meaningfully slower, exactly as documented ("exact may be slower... the other modes must remain practical").
+- **Dominance pruning** (§15, new): `DecoderState.dominance_key()` is a coarse signature (rounded per-guitar hand position, per-guitar last source track, and -- critically -- the FULL `(free_at_tick, holder_note_id)` value for every `string_free_at` entry, not just which (guitar, string) keys have ever been touched) used ONLY to collapse beams that are effectively redundant -- two beams with the same signature score every FUTURE event identically, so keeping the more expensive duplicate can never help. Applied in `decode_song` BEFORE the hard `beam_width` cutoff, every decode cycle. **Post-commit correctness fix**: the signature initially recorded only the SET of touched (guitar, string) keys, not their actual occupancy end-tick -- two beams that had touched the same strings at genuinely different times (and would therefore legally diverge on a future sustain-collision decision) were wrongly merged, which the pruning's own safety claim explicitly promises never to do. Fixed to include the full value; regression test `test_dominance_key_distinguishes_different_string_free_at_ticks`. Requiring exact tick/holder equality (not a rounded approximation, unlike hand position) is deliberate -- a hard-constraint-relevant value must never be fuzzed for a "close enough" merge. This makes the optimization more conservative than originally measured (real speedup varies by scenario and is not a fixed number worth quoting here), but a dominance rule that can silently corrupt a result is worse than no dominance rule at all; correctness took priority per §27's explicit rules. It still cannot turn a feasible search infeasible (verified: `test_dominance_pruning_never_turns_a_feasible_song_infeasible`).
+- `--search-mode {fast,balanced,best,exact}` is the new preferred CLI flag name (matches the spec's exact terminology); `--decode-quality` is kept as a working, deprecated-but-functional alias.
+
+#### 10.15.9 Backward compatibility, by construction
+
+- `MultiGuitarCostConfig`'s "minimum" preset has every new weight at `0.0` -- omitting `cost_config`/`arrangement_mode` entirely reproduces the exact pre-hardening-pass cost formula.
+- `tempo_events=None` (the default) reproduces the exact pre-hardening-pass tempo-blind hand-shift calculation.
+- `sustain_policy="strict"` reproduces the exact pre-hardening-pass `"preserve"` collision-blocking behavior (the DEFAULT `sustain_policy` value is unchanged at `"preserve"`, whose MEANING was refined to allow small bounded shortening -- see 10.15.7 -- rather than being renamed; a caller relying on the old zero-tolerance behavior should now pass `"strict"` explicitly).
+- `event_is_fingerable` is strictly MORE restrictive than the pre-existing checks, so it can only reject shapes that were already physically dubious under the old, weaker check -- the full pre-existing test suite (337 tests) still passes unchanged except one intentionally-recalibrated node-budget constant (§10.15.10).
+- No `nn.Module`/parameter changes -- `model.ARCHITECTURE_VERSION` stays at 5; no schema version bump (new note fields are optional and additive).
+
+#### 10.15.10 What broke, and why it was expected
+
+Fixing the CSP note-ordering bug (§2 -- the code sorted by `-pitch`, i.e. HIGHEST pitch first, while its own comment claimed lower-pitch-first "bass notes anchor a chord shape"; corrected to ascending pitch) and adding the fingering CSP hard filter (§10.15.5) together changed exactly which nodes a bounded backtracking search reaches first for a specific 5-note test fixture in `tests/test_multi_guitar_release_blocker.py`, so its old `max_backtrack_nodes=36` magic constant (calibrated to "finds exactly 1 result but is truncated" under the OLD, buggy ordering) no longer reproduced that behavior under the corrected, stricter search. Recalibrated to `3000` (verified via direct experimentation, same as the original constant's provenance) with an explanatory comment -- the test's INTENT (verify SEARCH_EXHAUSTED is reported when a truncated search still finds a real result) is unchanged, only the tuning constant. This is the one and only pre-existing test that needed touching; everything else in the 337-test baseline passed unmodified.
+
+#### 10.15.11 Honest limitations after this pass
+
+- **Not built**: a formal exact solver (branch-and-bound/CP-SAT) -- "exact" is a much larger bounded search, not a completeness proof. Justified per the spec's own "do not make a heavyweight external dependency mandatory unless justified."
+- **Not built**: a per-note `finger` field in the schema (§23's own example listed one) -- `fingering.FingeringResult` computes a full assignment (which fret pairs share a barre, how many individual fingers) but it is not currently attached back onto individual output notes, only used as a hard/soft signal during decode and via `metrics.difficult_chord_count`. Left out deliberately (§27: don't add fields beyond what's needed) since nothing downstream (GP5 export, rendering) currently reads a per-note finger number; wiring it through is a small, well-scoped follow-up if a future notation feature needs it.
+- **Right-hand modeling** (§17): deliberately NOT built beyond what already existed -- no picking-direction/string-skipping cost was added to the multi-guitar decoder (the single-guitar technique model already predicts beat-level pick direction separately, §4). The architecture (a `MultiGuitarCostConfig` field slot, a `_soft_cost` term) is ready to receive one without restructuring anything.
+- **`derive_role_hints`** (§10.15.3) is a genuinely lightweight per-event heuristic (lowest/highest/middle pitch), not real harmonic analysis -- documented as such, matching the spec's explicit "do not require full music-theory semantic understanding."
+- **`arrange` mode's multi-K search** is bounded (`arrange_search_margin`, default 2 extra K values) -- a deliberate, documented performance/quality tradeoff, not an exhaustive search over every possible guitar count.
+- **The candidate scorer** (§19, `model.forward_multi_guitar`) is unchanged by this pass and remains completely untrained -- every note-score hook this pass adds (arrangement-mode soft costs) composes ADDITIVELY with the existing (inert, since untrained) neural score term in `_backtrack_event`, never replacing it; the scorer's documented future feature list (register continuity, source track, candidate guitar count, etc.) is already producible from data this pass's diagnostics/stats now expose.

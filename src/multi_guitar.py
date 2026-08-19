@@ -127,15 +127,30 @@ class DecoderState:
     def dominance_key(self) -> tuple:
         """§15: a coarse signature of the "future-relevant" part of this
         state, used ONLY to deduplicate beams that are effectively
-        equivalent going forward (same rounded hand position per guitar,
-        same last-track-per-guitar, same set of still-ringing strings) --
-        never used for a hard decision, only to avoid the beam wasting slots
-        on near-duplicate states. Rounding hand_position to the nearest
-        fret keeps this a genuine "close enough" dominance test rather than
-        an exact-float coincidence that would rarely fire."""
+        equivalent going forward -- never used for a hard decision, only to
+        avoid the beam wasting slots on near-duplicate states. Rounding
+        hand_position to the nearest fret keeps this a genuine "close
+        enough" dominance test rather than an exact-float coincidence that
+        would rarely fire.
+
+        MUST include the full `(free_at_tick, holder_id)` value for every
+        `string_free_at` entry, not just which (guitar, string) keys have
+        ever been touched -- an earlier version of this method used only
+        the key set, which is NOT a valid dominance signature: two beams
+        can have touched the exact same set of strings while one string's
+        actual free-at tick differs by, say, 2000 ticks between them. Since
+        `_sustain_check` compares that tick directly against a FUTURE
+        note's onset, the two beams can legally diverge on a later event
+        (one permits an early re-attack, the other doesn't) even though
+        they'd have looked identical under the key-only signature -- that
+        is exactly the kind of "genuinely different future" this method's
+        own docstring promises never to discard. Caught on a fresh review
+        pass after the initial hardening-pass commit; regression test:
+        `tests/test_multi_guitar_hardening.py::
+        test_dominance_key_distinguishes_different_string_free_at_ticks`."""
         hp = tuple(sorted((g, round(v)) for g, v in self.hand_position.items()))
         tracks = tuple(sorted((g, t) for g, t in self.last_track_on_guitar.items()))
-        ringing = tuple(sorted(k for k, v in self.string_free_at.items()))
+        ringing = tuple(sorted(self.string_free_at.items()))
         return (hp, tracks, ringing)
 
 
@@ -880,7 +895,7 @@ def decode_song(
     `arrangement_mode`/`cost_config`: §3/§18 -- the MUSICAL-OBJECTIVE axis,
     independent of `quality` (the search-effort axis) and
     `playability_profile` (the physical-feasibility axis). `cost_config`
-    defaults to `constraints.MultiGuitarCostConfig.for_mode(arrangement_mode)`
+    defaults to `constraints.get_multi_guitar_cost_config(arrangement_mode)`
     when omitted; passing an explicit config overrides the mode-derived
     default (rare -- most callers should just pass `arrangement_mode`).
     `preferred_guitar`: §4 -- `{source_part_id: preferred_guitar_slot}`,
