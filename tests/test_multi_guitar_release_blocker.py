@@ -192,17 +192,24 @@ def test_truncated_search_with_zero_candidates_reports_search_exhausted():
 
 def test_truncated_search_with_some_candidates_still_reports_search_exhausted():
     # A genuinely branchy 5-note chord across 2 guitars, verified (via
-    # direct experimentation) to find exactly 1 valid assignment at
-    # max_backtrack_nodes=36 while still hitting the node budget --
+    # direct experimentation) to find some but not all valid assignments at
+    # max_backtrack_nodes=3000 while still hitting the node budget --
     # feasibility is real (a result WAS found), but the search must still
     # be reported as incomplete (item 2's core requirement: tracked
-    # independently of whether candidates were found).
+    # independently of whether candidates were found). This budget was
+    # recalibrated by the multi-guitar hardening pass: the CSP note-ordering
+    # fix (lower pitch first, not higher -- §2) and the new deterministic
+    # fingering/chord-shape hard filter (§5/§6, which rejects far more
+    # candidate leaves than the old barre-only proxy) both change how many
+    # nodes it takes to reach a valid, fingerable result for this exact
+    # chord, so the old budget=36 no longer reproduces a nonempty-but-
+    # truncated result under the corrected, stricter search.
     state = DecoderState()
     notes = [_note(i, p, 0) for i, p in enumerate([60, 62, 64, 65, 67])]
     profiles = [dict(PROFILE), dict(PROFILE)]
     results, diags = search_event_assignments(
         notes, profiles, state, get_playability_profile("balanced"), "preserve",
-        top_n=8, event_candidates=32, max_backtrack_nodes=36,
+        top_n=8, event_candidates=32, max_backtrack_nodes=3000,
     )
     assert len(results) >= 1  # feasible -- a real result WAS found
     assert any(d.code == "SEARCH_EXHAUSTED" for d in diags)
