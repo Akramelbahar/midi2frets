@@ -76,10 +76,30 @@ def test_effects_loss_is_masked_average_not_flat():
 
 def test_bend_magnitude_regression_masked():
     batch = _batch()
+    # A note with bend POINTS is by construction a note whose bend was
+    # examined and found present -- `dataset._technique_tensors` only ever
+    # sets y_bend_mask inside the `masks["bend"]` branch. The fixture now says
+    # so explicitly, because bend magnitude is gated on bend-positive notes
+    # (see train.bend_positive_mask): regressing a magnitude for a note with
+    # no bend is the "predict zero on 99 % of examples" failure that gating
+    # exists to prevent.
+    batch["y_bend_type"][1, 2] = S.BEND_TYPE_ID["BEND"]
     batch["y_bend_mask"][1, 2] = 1.0
     batch["y_bend_magnitude"][1, 2] = 2.0
     extra, m = technique_losses(_logits(), batch, {"bend_magnitude": 1.0})
     assert extra.item() > 0
+    assert m["bend_magnitude_n"] == 1
+
+
+def test_bend_magnitude_ignores_notes_with_no_bend():
+    """The regression head must never be trained to output 0 for unbent notes."""
+    batch = _batch()
+    batch["y_bend_type"][:] = S.BEND_TYPE_ID["NONE"]   # examined, confirmed no bend
+    batch["y_bend_mask"][1, 2] = 1.0                    # contradictory, and must lose
+    batch["y_bend_magnitude"][1, 2] = 2.0
+    extra, m = technique_losses(_logits(), batch, {"bend_magnitude": 1.0})
+    assert extra.item() == 0.0
+    assert m["bend_magnitude_n"] == 0
 
 
 def test_physical_consistency_penalizes_hammer_on_descending_fret():
