@@ -15,6 +15,7 @@ from schema import (
     BEND_CURVE_K, TRANSITION_LOOKBACK,
 )
 from dataset import FEATURE_SPEC_VERSION, NUM_MG_TRACK_BUCKETS, MAX_GUITAR_SLOTS, MAX_REQUESTED_K
+from fretboard import MAX_FRET, DEFAULT_FRET_COUNT
 
 # Head groups a checkpoint may or may not have real trained weights for.
 # "string" is always considered trained (the original, always-supervised
@@ -124,7 +125,7 @@ class GuitarSlotEncoder(nn.Module):
             dtype=torch.long, device=device,
         )
         fret_counts = torch.tensor(
-            [[p.get("fret_count", 24) / 24.0] for p in guitar_profiles],
+            [[p.get("fret_count", DEFAULT_FRET_COUNT) / float(MAX_FRET)] for p in guitar_profiles],
             dtype=torch.float32, device=device,
         )
         programs = torch.tensor(
@@ -450,7 +451,7 @@ class GuitarStringTransformer(nn.Module):
         event_e = event_ctx.view(B, T, 1, 1, D).expand(B, T, K, max_strings, D)
         slot_e = slot_ctx.view(B, 1, K, 1, D).expand(B, T, K, max_strings, D)
         str_e = string_emb.view(1, 1, 1, max_strings, D).expand(B, T, K, max_strings, D)
-        norm_fret = (frets.float() / 24.0).unsqueeze(-1)
+        norm_fret = (frets.float() / float(MAX_FRET)).unsqueeze(-1)
         is_open = (frets == 0).float().unsqueeze(-1)
         fret_feat = torch.cat([norm_fret, is_open], dim=-1)  # (B,T,K,S,2)
 

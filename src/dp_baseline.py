@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from parser import STANDARD_TUNING
+from fretboard import MAX_FRET
 
 
 def _fret(pitch: int, string: int, tuning: list[int], capo: int) -> int:
@@ -17,7 +18,7 @@ def dp_baseline(
     notes: list[dict[str, Any]],
     tuning: list[int] | None = None,
     capo: int = 0,
-    frets_max: int = 24,
+    frets_max: int = MAX_FRET,
     move_weight: float = 1.0,
     open_bonus: float = 0.2,
     fret_penalty: float = 0.05,
@@ -103,7 +104,7 @@ def dp_baseline(
     return chosen
 
 
-def dp_baseline_forward(notes, tuning=None, capo=0, frets_max=24, move_weight=1.0, open_bonus=0.2, fret_penalty=0.05):
+def dp_baseline_forward(notes, tuning=None, capo=0, frets_max=MAX_FRET, move_weight=1.0, open_bonus=0.2, fret_penalty=0.05):
     """Cleaner forward-only Viterbi with backpointers."""
     tuning = tuning or STANDARD_TUNING
     n = len(notes)

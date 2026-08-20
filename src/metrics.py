@@ -5,6 +5,7 @@ from typing import Any
 
 import schema as S
 from parser import STANDARD_TUNING
+from fretboard import MAX_FRET
 
 
 def _fret(note: dict[str, Any], string: int, tuning: list[int], capo: int) -> int:
@@ -12,7 +13,7 @@ def _fret(note: dict[str, Any], string: int, tuning: list[int], capo: int) -> in
 
 
 def playable_fret_rate(notes: list[dict[str, Any]], strings: list[int], tuning: list[int], capo: int,
-                        frets_max: int = 24) -> float:
+                        frets_max: int = MAX_FRET) -> float:
     """Fraction of predictions landing on a physically playable fret
     [0, frets_max]. By construction every constrained decoder (greedy/beam/
     sample in inference.py) should always score 1.0 here -- this is a
@@ -691,3 +692,157 @@ if __name__ == "__main__":
     capo = res["metadata"]["capo"]
     dp_strings = dp_baseline_forward(notes, tuning=tuning, capo=capo)
     print(evaluate(notes, dp_strings, tuning, capo))
+
+
+# =========================================================================== #
+# Imbalanced-classification reporting
+#
+# Accuracy alone is actively misleading for every technique head in this
+# project: >99% of notes carry TRANSITION_ID["NONE"], no harmonic and no
+# bend, so "predict the majority class always" scores ~99% while learning
+# nothing. These helpers report the numbers that can actually distinguish
+# the two -- per-class precision/recall/F1 with SUPPORT, macro-F1 (which
+# weights a rare class as heavily as the dominant one), and the majority
+# baseline the model has to beat to have earned anything.
+#
+# Pure-python over flat int sequences, so they work identically on tensors
+# (via .tolist()) and on decoded output, and stay unit-testable without torch.
+# =========================================================================== #
+
+def classification_report(
+    preds: list[int], targets: list[int], num_classes: int,
+    class_names: list[str] | None = None, ignore_index: int = -100,
+) -> dict[str, Any]:
+    """Per-class precision/recall/F1/support + macro-F1 + majority baseline.
+
+    Positions where `targets[i] == ignore_index` are dropped (unlabeled, not
+    wrong). Returns `{"support": 0, ...}` with None metrics -- never NaN and
+    never 0.0 -- when nothing is labeled, so "no data" and "predicted
+    everything wrong" can be told apart in a log.
+    """
+    tp = [0] * num_classes
+    fp = [0] * num_classes
+    fn = [0] * num_classes
+    support = [0] * num_classes
+    correct = 0
+    total = 0
+    for p, t in zip(preds, targets):
+        if t == ignore_index:
+            continue
+        total += 1
+        support[t] += 1
+        if p == t:
+            tp[t] += 1
+            correct += 1
+        else:
+            fn[t] += 1
+            if 0 <= p < num_classes:
+                fp[p] += 1
+
+    if total == 0:
+        return {
+            "support": 0, "accuracy": None, "macro_f1": None,
+            "macro_precision": None, "macro_recall": None,
+            "majority_baseline": None, "majority_class": None,
+            "per_class": [], "n_classes_present": 0,
+        }
+
+    per_class = []
+    f1s, precs, recs = [], [], []
+    for c in range(num_classes):
+        name = class_names[c] if class_names and c < len(class_names) else str(c)
+        # A class with no support and no predictions is genuinely absent from
+        # this split -- reported as None and EXCLUDED from the macro average,
+        # rather than silently counted as a 0.0 that drags macro-F1 down.
+        if support[c] == 0 and (tp[c] + fp[c]) == 0:
+            per_class.append({"class": c, "name": name, "support": 0,
+                               "precision": None, "recall": None, "f1": None})
+            continue
+        prec = tp[c] / (tp[c] + fp[c]) if (tp[c] + fp[c]) else 0.0
+        rec = tp[c] / (tp[c] + fn[c]) if (tp[c] + fn[c]) else 0.0
+        f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) else 0.0
+        per_class.append({"class": c, "name": name, "support": support[c],
+                           "precision": prec, "recall": rec, "f1": f1})
+        f1s.append(f1); precs.append(prec); recs.append(rec)
+
+    majority_class = max(range(num_classes), key=lambda c: support[c])
+    return {
+        "support": total,
+        "accuracy": correct / total,
+        "macro_f1": sum(f1s) / len(f1s) if f1s else None,
+        "macro_precision": sum(precs) / len(precs) if precs else None,
+        "macro_recall": sum(recs) / len(recs) if recs else None,
+        "majority_baseline": support[majority_class] / total,
+        "majority_class": majority_class,
+        "majority_class_name": (class_names[majority_class]
+                                 if class_names and majority_class < len(class_names)
+                                 else str(majority_class)),
+        "per_class": per_class,
+        "n_classes_present": sum(1 for c in range(num_classes) if support[c] > 0),
+    }
+
+
+def multilabel_report(
+    preds: list[list[int]], targets: list[list[int]], label_names: list[str] | None = None,
+) -> dict[str, Any]:
+    """Per-FLAG precision/recall/F1/support for the independent binary
+    effects head, plus macro-F1 over flags and the "always predict absent"
+    baseline. Same all-None-on-no-data contract as classification_report.
+    """
+    if not targets:
+        return {"support": 0, "macro_f1": None, "micro_accuracy": None,
+                "all_negative_baseline": None, "per_label": []}
+    n_labels = len(targets[0])
+    tp = [0] * n_labels; fp = [0] * n_labels; fn = [0] * n_labels; pos = [0] * n_labels
+    hits = 0
+    for p_row, t_row in zip(preds, targets):
+        for k in range(n_labels):
+            p, t = int(p_row[k]), int(t_row[k])
+            pos[k] += t
+            if p == t:
+                hits += 1
+                tp[k] += p
+            elif p:
+                fp[k] += 1
+            else:
+                fn[k] += 1
+
+    n = len(targets)
+    per_label, f1s = [], []
+    for k in range(n_labels):
+        name = label_names[k] if label_names and k < len(label_names) else str(k)
+        prec = tp[k] / (tp[k] + fp[k]) if (tp[k] + fp[k]) else None
+        rec = tp[k] / (tp[k] + fn[k]) if (tp[k] + fn[k]) else None
+        if prec is None or rec is None or (prec + rec) == 0:
+            f1 = 0.0 if pos[k] else None
+        else:
+            f1 = 2 * prec * rec / (prec + rec)
+        per_label.append({"label": k, "name": name, "support": pos[k],
+                           "precision": prec, "recall": rec, "f1": f1})
+        if f1 is not None:
+            f1s.append(f1)
+    return {
+        "support": n,
+        "macro_f1": sum(f1s) / len(f1s) if f1s else None,
+        "micro_accuracy": hits / (n * n_labels) if n_labels else None,
+        # What "predict absent for every flag" would score -- the number an
+        # effects head reporting 99% accuracy is usually just reproducing.
+        "all_negative_baseline": (
+            sum(n - pos[k] for k in range(n_labels)) / (n * n_labels) if n_labels else None),
+        "per_label": per_label,
+    }
+
+
+def regression_report(abs_errors: list[float]) -> dict[str, Any]:
+    """MAE/RMSE for a masked regression head (bend magnitude). Returns
+    `{"support": 0, "mae": None, ...}` -- N/A, explicitly -- when the split
+    contained no valid example, instead of a 0/0 NaN."""
+    if not abs_errors:
+        return {"support": 0, "mae": None, "rmse": None, "max_abs_error": None}
+    n = len(abs_errors)
+    return {
+        "support": n,
+        "mae": sum(abs_errors) / n,
+        "rmse": (sum(e * e for e in abs_errors) / n) ** 0.5,
+        "max_abs_error": max(abs_errors),
+    }

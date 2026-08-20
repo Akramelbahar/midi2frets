@@ -1,7 +1,7 @@
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Optional, List, Dict
+
 import mido
 import numpy as np
 import pretty_midi
@@ -17,6 +17,7 @@ from inference import greedy_predict, beam_search_predict, sample_predict, predi
 from multi_guitar import auto_select_guitar_count, resolve_guitar_profiles, assign_voices, derive_role_hints
 from notation_quantizer import quantize_notes
 from parser import TPQ, STANDARD_TUNING
+from fretboard import MAX_FRET, DEFAULT_FRET_COUNT
 from tab_render import render_tab
 from gp5_export import export_gp5, rows_to_schema_notes, predicted_rows_to_schema_notes
 
@@ -359,7 +360,7 @@ def midi_to_notes(
     path,
     tuning=STANDARD_TUNING,
     capo=0,
-    frets_max=24,
+    frets_max=MAX_FRET,
     track_index=None,
     quant=32,
     min_dur_ticks=60,
@@ -544,7 +545,7 @@ def midi_to_notes(
     return out, meta, stats
 
 
-def auto_select_capo(pitches, tuning=STANDARD_TUNING, frets_max=24, max_capo=9):
+def auto_select_capo(pitches, tuning=STANDARD_TUNING, frets_max=MAX_FRET, max_capo=9):
     """
     Pick the capo that keeps every note playable while moving the arrangement
     into open position: maximize open strings and low-fret (0-3) coverage,
@@ -796,7 +797,7 @@ def run_multi_guitar_pipeline(
     guitar_tracks = [
         S.new_guitar_track(
             g, guitar_notes[g], tuning=profiles[g]["tuning"], capo=profiles[g].get("capo", 0),
-            fret_count=profiles[g].get("fret_count", 24), program=profiles[g].get("program", 25),
+            fret_count=profiles[g].get("fret_count", DEFAULT_FRET_COUNT), program=profiles[g].get("program", 25),
             pan=profiles[g].get("pan", 64),
         )
         for g in range(K)

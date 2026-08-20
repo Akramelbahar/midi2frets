@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 
 import schema as S
-from constraints import apply_string_mask
+from constraints import apply_string_mask, safe_log_softmax
 from dataset import FEATURE_KEYS, _split_into_chunks, collate_fn
 from model import GuitarStringTransformer
 from parser import STANDARD_TUNING, compute_features
@@ -200,7 +200,15 @@ def _compute_log_probs(
         batch = {k: v.unsqueeze(0).to(device) for k, v in _batch_from_notes(chunk, seq_len).items()}
         logits = model({k: batch[k] for k in FEATURE_KEYS}, batch["pad_mask"])
         masked = apply_string_mask(logits, batch["pitch"], tuning, capo)
-        log_probs = F.log_softmax(masked, dim=-1)[0].cpu()  # (T, 6)
+        # safe_log_softmax, not F.log_softmax: a note that no string can play
+        # under the fret contract (e.g. a MIDI pitch above the 24th fret of
+        # the highest string) arrives here as a row of six -inf, and plain
+        # log_softmax turns that into NaN -- which then defeats the
+        # `isinf` candidate filters below (NaN is not inf), letting a NaN
+        # score win the argmax silently. The safe version emits a uniform
+        # finite floor for such a row instead: every string is offered, the
+        # decoder still has to pick one, and nothing downstream sees a NaN.
+        log_probs = safe_log_softmax(masked, dim=-1)[0].cpu()  # (T, 6)
         for i in range(len(chunk)):
             log_probs_list[start + i] = log_probs[i]
     assert all(lp is not None for lp in log_probs_list)

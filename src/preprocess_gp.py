@@ -10,6 +10,7 @@ from typing import Any
 
 import schema as S
 from gp_parser import parse_guitarpro_tracks
+from fretboard import DEFAULT_FRET_COUNT
 
 
 def _process_one(src: str, out_dir: Path) -> dict[str, Any]:
@@ -95,7 +96,7 @@ def _process_one_grouped(src: str, out_dir: Path) -> dict[str, Any]:
                 "original_guitar_track_id": track_idx,
                 "original_track_name": meta.get("track_name", ""),
                 "tuning": meta["tuning"], "capo": meta["capo"],
-                "fret_count": meta.get("frets", 24), "program": meta.get("program"),
+                "fret_count": meta.get("frets", DEFAULT_FRET_COUNT), "program": meta.get("program"),
                 "notes": res["notes"],  # string/fret/voice-labelled -- the training TARGET
             })
             total_notes += len(res["notes"])

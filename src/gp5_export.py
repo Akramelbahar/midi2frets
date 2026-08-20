@@ -27,6 +27,7 @@ from guitarpro import models as gpm
 
 import schema as S
 from parser import TPQ
+from fretboard import DEFAULT_FRET_COUNT
 
 QUARTER_TIME = 960  # Guitar Pro's internal start offset of the first measure
 
@@ -332,7 +333,7 @@ def export_gp5(
     song.tempo = int(round(tempo_events[0]["bpm"]))
     track = song.tracks[0]
     track.name = "midi2frets"
-    track.fretCount = 24
+    track.fretCount = DEFAULT_FRET_COUNT
     track.offset = capo
     track.strings = [gpm.GuitarString(number=i + 1, value=v) for i, v in enumerate(tuning)]
     if track.channel is not None:
@@ -478,7 +479,7 @@ def export_multi_guitar_gp5(
     for idx, gt in enumerate(guitar_tracks):
         tuning = gt.get("tuning") or [64, 59, 55, 50, 45, 40]
         capo = gt.get("capo", 0)
-        fret_count = gt.get("fret_count", 24)
+        fret_count = gt.get("fret_count", DEFAULT_FRET_COUNT)
         program = gt.get("program", 25)
         pan = gt.get("pan", 64)
         name = gt.get("name") or f"Guitar {idx + 1}"

@@ -1,11 +1,30 @@
-"""Constraint masking: which strings are physically possible for a given pitch."""
+"""Constraint masking: which strings are physically possible for a given pitch.
+
+The fret ceiling itself is NOT decided here -- `fretboard.py` owns the
+product contract (fixed 6-string, 24-fret guitar); this module is its
+tensor-shaped half.
+"""
 from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
 
+from fretboard import (  # noqa: F401  (re-exported for tensor-side callers)
+    MAX_FRET, MIN_FRET, NUM_STRINGS, resolve_max_fret,
+)
 
-def safe_log_softmax(logits: torch.Tensor, dim: int = -1, floor: float = -1e4) -> torch.Tensor:
+# The finite stand-in for "impossible" used everywhere a masked logit feeds a
+# softmax/log_softmax. -inf is mathematically right but numerically radioactive:
+# a row where EVERY entry is -inf makes softmax/log_softmax return NaN (0/0),
+# and that NaN then propagates through multiplication by a zero mask (0 * NaN is
+# NaN, not 0), poisoning an entire batch's loss and gradients. A finite floor
+# underflows to probability 0 in float32/float16 all the same, so results are
+# numerically identical wherever -inf was well-defined -- it just cannot produce
+# NaN where -inf could.
+MASK_FLOOR = -1e4
+
+
+def safe_log_softmax(logits: torch.Tensor, dim: int = -1, floor: float = MASK_FLOOR) -> torch.Tensor:
     """A log_softmax that NEVER returns NaN. A row that is entirely -inf
     (every candidate illegal along `dim`) makes ordinary F.log_softmax
     return NaN (0/0 in the underlying division); this replaces such a row
@@ -23,42 +42,108 @@ def safe_log_softmax(logits: torch.Tensor, dim: int = -1, floor: float = -1e4) -
     return torch.where(all_illegal.expand_as(lp), torch.full_like(lp, floor), lp)
 
 
-def compute_frets(pitch: torch.Tensor, tuning: list[int], capo: int) -> torch.Tensor:
+def compute_frets(pitch: torch.Tensor, tuning: list[int] | torch.Tensor, capo: int | torch.Tensor) -> torch.Tensor:
     """
     Args:
         pitch: tensor of MIDI pitches, any shape ending with (..., T)
+        tuning: 6-element list (one instrument) OR a broadcastable tensor
+            shaped (..., T, 6) (per-note tuning, as the dataset emits)
+        capo: int OR a tensor broadcastable to (..., T)
     Returns:
         frets: (..., T, 6) fret positions per string.
     """
-    tuning_t = torch.tensor(tuning, dtype=pitch.dtype, device=pitch.device)
+    if not torch.is_tensor(tuning):
+        tuning = torch.tensor(tuning, dtype=pitch.dtype, device=pitch.device)
+    if not torch.is_tensor(capo):
+        capo = torch.tensor(capo, dtype=pitch.dtype, device=pitch.device)
+    if capo.dim() == pitch.dim():
+        capo = capo.unsqueeze(-1)
     # pitch[..., None] - tuning[None, ...]
-    frets = pitch.unsqueeze(-1) - tuning_t - capo
-    return frets
+    return pitch.unsqueeze(-1) - tuning - capo
 
 
-def valid_string_mask(pitch: torch.Tensor, tuning: list[int], capo: int, frets_max: int = 24) -> torch.Tensor:
+def valid_string_mask(
+    pitch: torch.Tensor, tuning: list[int] | torch.Tensor, capo: int | torch.Tensor,
+    frets_max: int = MAX_FRET,
+) -> torch.Tensor:
     """
     Returns bool mask (..., T, 6) where True means fret in [0, frets_max].
     """
     frets = compute_frets(pitch, tuning, capo)
-    return (frets >= 0) & (frets <= frets_max)
+    return (frets >= MIN_FRET) & (frets <= frets_max)
 
 
-def apply_string_mask(logits: torch.Tensor, pitch: torch.Tensor, tuning: list[int], capo: int, frets_max: int = 24) -> torch.Tensor:
+def apply_string_mask(
+    logits: torch.Tensor, pitch: torch.Tensor, tuning: list[int] | torch.Tensor,
+    capo: int | torch.Tensor, frets_max: int = MAX_FRET, floor: float = float("-inf"),
+) -> torch.Tensor:
     """
-    Set logits for impossible strings to -inf.
+    Set logits for impossible strings to `floor` (-inf by default, for
+    decoders that test `isinf` to enumerate candidates; pass
+    `floor=MASK_FLOOR` when the result will feed a softmax directly).
     logits: (B, T, 6)
     pitch:  (B, T)
     """
     mask = valid_string_mask(pitch, tuning, capo, frets_max)  # (B, T, 6)
-    masked = logits.masked_fill(~mask, float("-inf"))
-    return masked
+    return logits.masked_fill(~mask, floor)
+
+
+def string_supervision_masks(
+    pitch: torch.Tensor,
+    y_string: torch.Tensor,
+    pad_mask: torch.Tensor,
+    tuning: torch.Tensor,
+    capo: torch.Tensor,
+    max_fret: int = MAX_FRET,
+    ignore_index: int = -100,
+) -> dict[str, torch.Tensor]:
+    """THE shared answer to "which notes in this batch may supervise the
+    string head, and which rows are safe to softmax". Used by the training
+    loss, the validation metrics, and the tests, so the three can never
+    disagree about what a usable note is.
+
+    Shapes: pitch/y_string/capo (B, T); pad_mask (B, T) True=pad;
+    tuning (B, T, 6).
+
+    Returns (all bool unless noted):
+      frets             (B, T, 6) long -- fret each string would need
+      legal             (B, T, 6) -- fret within [0, max_fret]
+      has_any_legal     (B, T)    -- the note is playable at all
+      target_legal      (B, T)    -- its ANNOTATED string is itself playable
+      real              (B, T)    -- not padding
+      labeled           (B, T)    -- real and carrying a string label
+      usable            (B, T)    -- labeled AND playable AND target legal:
+                                    the only notes that may enter the CE
+      softmax_safe_mask (B, T, 6) -- entries to KEEP unmasked; a row with no
+                                    legal string keeps all six (an arbitrary
+                                    but finite distribution) instead of
+                                    becoming an all -inf NaN factory. Those
+                                    rows are excluded from every loss anyway.
+    """
+    frets = compute_frets(pitch, tuning, capo)                     # (B, T, 6)
+    legal = (frets >= MIN_FRET) & (frets <= max_fret)
+    has_any_legal = legal.any(dim=-1)                              # (B, T)
+
+    real = ~pad_mask
+    labeled = real & (y_string != ignore_index)
+    in_range = labeled & (y_string >= 0) & (y_string < legal.size(-1))
+
+    safe_target = torch.where(in_range, y_string, torch.zeros_like(y_string))
+    target_legal = legal.gather(-1, safe_target.unsqueeze(-1)).squeeze(-1) & in_range
+
+    usable = in_range & has_any_legal & target_legal
+    softmax_safe_mask = legal | (~has_any_legal).unsqueeze(-1) | pad_mask.unsqueeze(-1)
+
+    return {
+        "frets": frets, "legal": legal, "has_any_legal": has_any_legal,
+        "target_legal": target_legal, "real": real, "labeled": labeled,
+        "usable": usable, "softmax_safe_mask": softmax_safe_mask,
+    }
 
 
 def safe_frets_for_loss(frets: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
     """Replace invalid frets with 0 so they contribute nothing to expected fret."""
     return frets.masked_fill(~valid, 0.0)
-
 
 # =========================================================================== #
 # Multi-guitar candidate generation and playability profiles
@@ -101,7 +186,7 @@ class PlayabilityProfile:
     name: str = "balanced"
     max_chord_span_frets: int = 5
     max_preferred_fret: int = 17
-    absolute_max_fret: int = 24
+    absolute_max_fret: int = MAX_FRET
     max_hand_shift_per_beat: int = 7
     max_hand_shift_frets_per_second: float = 14.0
     allow_barre: bool = True
@@ -185,7 +270,8 @@ def legal_candidates_for_pitch(
     for g, profile in enumerate(guitar_profiles):
         tuning = profile["tuning"]
         capo = profile.get("capo", 0)
-        fret_count = profile.get("fret_count", 24)
+        # fretboard.py owns the ceiling: a profile may only ever tighten it.
+        fret_count = resolve_max_fret(profile.get("fret_count"))
         if playability_profile is not None:
             fret_count = min(fret_count, playability_profile.absolute_max_fret)
         for s, open_pitch in enumerate(tuning):
@@ -215,7 +301,7 @@ def candidate_mask_tensor(
     for g, profile in enumerate(guitar_profiles):
         tuning = profile["tuning"]
         capo = profile.get("capo", 0)
-        fret_count = profile.get("fret_count", 24)
+        fret_count = resolve_max_fret(profile.get("fret_count"))
         if playability_profile is not None:
             fret_count = min(fret_count, playability_profile.absolute_max_fret)
         for s in range(max_strings):

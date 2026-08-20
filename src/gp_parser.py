@@ -30,6 +30,7 @@ except ImportError as e:
 
 import schema as S
 from parser import TPQ, STANDARD_TUNING
+from fretboard import DEFAULT_FRET_COUNT
 
 # MIDI program numbers for guitar instruments
 GUITAR_PROGRAMS = set(range(24, 32))  # 24-31
@@ -356,7 +357,7 @@ def _parse_track(track, title: str, path: Path, song_tempo: float = 120.0) -> di
         "track_name": track.name,
         "capo": capo,
         "tuning": tuning,
-        "frets": 24,
+        "frets": DEFAULT_FRET_COUNT,
         "num_notes": len(raw_notes),
         "num_measures": len(track.measures),
         "string_count": len(tuning),
@@ -410,7 +411,7 @@ def parse_guitarpro(path: str | Path, title: str | None = None) -> dict[str, Any
                 "track_name": "",
                 "capo": 0,
                 "tuning": STANDARD_TUNING,
-                "frets": 24,
+                "frets": DEFAULT_FRET_COUNT,
                 "num_notes": 0,
                 "num_measures": 0,
                 "string_count": 6,

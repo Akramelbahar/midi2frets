@@ -11,6 +11,7 @@ from torch.utils.data import Dataset
 import schema as S
 from parser import TPQ, STANDARD_TUNING, compute_features, load_song
 from constraints import compute_frets, valid_string_mask
+from fretboard import MAX_FRET, DEFAULT_FRET_COUNT, is_supervisable
 
 FEATURE_KEYS = [
     "pitch",
@@ -88,13 +89,18 @@ def transpose_notes(
         new_pitch = note["pitch"] + semitones
         tuning = note.get("tuning", tuning_default)
         capo = note.get("capo", capo_default)
-        valid = valid_string_mask(torch.tensor([new_pitch], dtype=torch.long), tuning, capo, frets_max=24)[0, 0]
+        # valid_string_mask returns (1, 6) here (one pitch x six strings);
+        # indexing [0, 0] read string 0 ALONE, so any note the high E string
+        # could not reach -- most of the fretboard -- was rejected as
+        # "unplayable" and silently disabled transposition for that chunk.
+        valid = valid_string_mask(
+            torch.tensor([new_pitch], dtype=torch.long), tuning, capo, frets_max=MAX_FRET)[0]
         if not valid.any():
             return None
         tnote = dict(note)
         tnote["pitch"] = new_pitch
         new_fret = new_pitch - tuning[tnote["string"]] - capo
-        if not (0 <= new_fret <= 24):
+        if not (0 <= new_fret <= MAX_FRET):
             return None
         tnote["fret"] = new_fret
         # Chord labels move with the music
@@ -271,10 +277,44 @@ def _technique_tensors(notes: list[dict[str, Any]], pad_len: int) -> dict[str, t
     }
 
 
+def string_supervision_targets(
+    notes: list[dict[str, Any]], tuning_default: list[int], capo_default: int,
+    max_fret: int = MAX_FRET,
+) -> list[int]:
+    """The `y_string` label for each note, with unsupported notes
+    DETERMINISTICALLY excluded (-100, the CE ignore_index) rather than
+    dropped from the sequence or relabelled.
+
+    A note is excluded when its own annotated string implies a fret outside
+    [0, max_fret] under the product fret contract (fretboard.py) -- e.g. a
+    Guitar Pro source that notates fret 25+, which this product cannot
+    represent. Three things this deliberately does NOT do:
+
+      * it does not move the note to a reachable string -- that would invent
+        ground truth the source never asserted;
+      * it does not delete the note -- it is still real music, so it stays in
+        the INPUT stream as context and still supervises the technique heads;
+      * it does not leave it labeled -- a target whose fret is unrepresentable
+        used to put -inf at the CE target index, which is +inf loss and then
+        NaN parameters.
+
+    Notes whose annotated string index is out of range are excluded the same
+    way (a malformed record can never become a training target).
+    """
+    out = []
+    for n in notes:
+        tuning = n.get("tuning", tuning_default)
+        capo = n.get("capo", capo_default)
+        string = n["string"]
+        out.append(string if is_supervisable(n["pitch"], string, tuning, capo, max_fret) else -100)
+    return out
+
+
 def encode_chunk(
     notes: list[dict[str, Any]], seq_len: int,
     tuning_default: list[int], capo_default: int,
     augment: bool = False, transpose_range: int = 3, drop_rate: float = 0.05,
+    song_id: str = "", max_fret: int = MAX_FRET,
 ) -> dict[str, torch.Tensor]:
     """Turn one chunk of note dicts into padded model tensors (shared by both datasets)."""
     if augment:
@@ -293,7 +333,11 @@ def encode_chunk(
 
     return {
         **features,
-        "y_string": torch.tensor([n["string"] for n in notes] + [-100] * pad_len, dtype=torch.long),
+        # -100 both for padding AND for real notes the fret contract cannot
+        # supervise -- see string_supervision_targets.
+        "y_string": torch.tensor(
+            string_supervision_targets(notes, tuning_default, capo_default, max_fret) + [-100] * pad_len,
+            dtype=torch.long),
         "y_fret": torch.tensor([n["fret"] for n in notes] + [0] * pad_len, dtype=torch.long),
         # Chord labels where the score is annotated; -100 = unlabeled (ignored by CE)
         "y_chord_root": torch.tensor(
@@ -305,6 +349,9 @@ def encode_chunk(
         "tuning": torch.tensor([n.get("tuning", tuning_default) for n in notes] + [[0] * 6] * pad_len, dtype=torch.long),
         "capo": torch.tensor([n.get("capo", capo_default) for n in notes] + [0] * pad_len, dtype=torch.long),
         "pad_mask": torch.tensor([False] * T + [True] * pad_len, dtype=torch.bool),
+        # Provenance, carried through collation as a plain string so a
+        # fail-fast abort can name the songs/tracks in the offending batch.
+        "song_id": song_id,
         **_technique_tensors(notes, pad_len),
     }
 
@@ -334,6 +381,7 @@ class GuitarTabDataset(Dataset):
         log = log_fn or (lambda msg: print(msg, flush=True))
         self.paths: list[str | Path] = list(json_paths)
         self.chunks: list[list[dict[str, Any]]] = []
+        self.chunk_sources: list[str] = []   # parallel to self.chunks (provenance)
         total = len(json_paths)
         report_every = max(1, total // 50)  # ~50 progress lines
         n_notes = 0
@@ -343,7 +391,9 @@ class GuitarTabDataset(Dataset):
                 parsed = load_song(path)
                 notes = compute_features(parsed["notes"])
                 if notes:
-                    self.chunks.extend(_split_into_chunks(notes, seq_len, stride))
+                    new_chunks = _split_into_chunks(notes, seq_len, stride)
+                    self.chunks.extend(new_chunks)
+                    self.chunk_sources.extend([str(path)] * len(new_chunks))
                     n_notes += len(notes)
             except Exception as e:  # skip corrupt/odd files, keep going
                 n_failed += 1
@@ -360,13 +410,26 @@ class GuitarTabDataset(Dataset):
         return encode_chunk(
             self.chunks[idx], self.seq_len, self.tuning, self.capo,
             augment=self.augment, transpose_range=self.transpose_range, drop_rate=self.drop_rate,
+            song_id=self.chunk_sources[idx] if idx < len(self.chunk_sources) else "",
         )
 
 
-def collate_fn(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
-    """Stack a list of samples into a batch."""
+def collate_fn(batch: list[dict[str, Any]]) -> dict[str, Any]:
+    """Stack a list of samples into a batch.
+
+    Tensor entries stack as before; non-tensor entries (currently just
+    `song_id`) are kept as a per-example LIST, so batch provenance survives
+    into the training loop's diagnostics. Consumers must therefore move
+    batches with `train.to_device`, not a blanket `.to(device)` comprehension.
+    """
     keys = batch[0].keys()
-    return {k: torch.stack([b[k] for b in batch]) for k in keys}
+    out: dict[str, Any] = {}
+    for k in keys:
+        if torch.is_tensor(batch[0][k]):
+            out[k] = torch.stack([b[k] for b in batch])
+        else:
+            out[k] = [b[k] for b in batch]
+    return out
 
 
 # =========================================================================== #
@@ -771,7 +834,7 @@ class MultiGuitarDataset(Dataset):
         guitar_profiles = [
             {
                 "tuning": list(t["tuning"]), "capo": t.get("capo", 0),
-                "fret_count": t.get("fret_count", 24), "program": t.get("program") or 25,
+                "fret_count": t.get("fret_count", DEFAULT_FRET_COUNT), "program": t.get("program") or 25,
             }
             for t in original_tracks
         ]

@@ -27,6 +27,12 @@ from __future__ import annotations
 
 from typing import Any
 
+
+# The fret/string contract lives in fretboard.py -- the one module every
+# layer (parser, schema, dataset, trainer, decoder, validator) agrees with,
+# so a fret_count default can never drift between them.
+from fretboard import DEFAULT_FRET_COUNT, NUM_STRINGS  # noqa: F401
+
 # 2 -> 3: additive. Every schema_version-2 note field (id/time/dur_ticks/
 # effects/harmonic/bend/incoming_transition/label_masks/string/fret/voice)
 # is unchanged; version 3 only ADDS the multi-guitar note fields
@@ -453,7 +459,7 @@ def migrate_flat_notes(notes: list[dict[str, Any]], metadata: dict[str, Any]) ->
         "title": metadata.get("title", ""), "artist": metadata.get("artist", ""),
         "source": metadata.get("source", "legacy"), "track_name": metadata.get("track_name", ""),
         "instrument": "guitar", "string_count": len(tuning), "tuning": tuning,
-        "capo": capo, "fret_count": metadata.get("frets", 24),
+        "capo": capo, "fret_count": metadata.get("frets", DEFAULT_FRET_COUNT),
     }
     return build_song_schema(out, meta)
 
@@ -532,7 +538,7 @@ DIAGNOSTIC_CODES = [
 
 
 def default_guitar_profile(
-    tuning: list[int] | None = None, capo: int = 0, fret_count: int = 24,
+    tuning: list[int] | None = None, capo: int = 0, fret_count: int = DEFAULT_FRET_COUNT,
     program: int = 25, pan: int = 64,
 ) -> dict[str, Any]:
     """One physical guitar's configuration -- tuning/capo/fret_count are what
@@ -651,7 +657,7 @@ def new_guitar_note(
 def new_guitar_track(
     guitar_slot: int, notes: list[dict[str, Any]], *, name: str | None = None,
     role: str | None = None, tuning: list[int] | None = None, capo: int = 0,
-    fret_count: int = 24, program: int = 25, pan: int = 64,
+    fret_count: int = DEFAULT_FRET_COUNT, program: int = 25, pan: int = 64,
 ) -> dict[str, Any]:
     return {
         "guitar_slot": guitar_slot, "name": name or f"Guitar {guitar_slot + 1}", "role": role,

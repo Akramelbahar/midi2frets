@@ -15,10 +15,13 @@ from pathlib import Path
 from typing import Any
 
 import schema as S
+# The 6-string/24-fret product contract and the standard tuning live in
+# fretboard.py (one source of truth shared by parser/dataset/train/
+# inference/validator); re-exported here so every existing
+# `from parser import STANDARD_TUNING` keeps working unchanged.
+from fretboard import DEFAULT_FRET_COUNT, STANDARD_TUNING  # noqa: F401
 
 TPQ = 960
-
-STANDARD_TUNING = [64, 59, 55, 50, 45, 40]  # high to low string (string 0 .. 5)
 
 # Ordinal dynamics -> approximate MIDI velocity. Songsterr stores a musical
 # dynamics MARKING ("mf", "ff", ...), not a raw 0-127 value, so this is a
@@ -183,7 +186,7 @@ def parse_songsterr(path: str | Path) -> dict[str, Any]:
             "title": data.get("name", path.stem),
             "capo": data.get("capo", 0),
             "tuning": data.get("tuning", STANDARD_TUNING),
-            "frets": data.get("frets", 24),
+            "frets": data.get("frets", DEFAULT_FRET_COUNT),
             "num_notes": len(notes),
             "num_measures": data.get("num_measures", 0),
             "source": data.get("source", "json"),
@@ -204,7 +207,7 @@ def parse_songsterr(path: str | Path) -> dict[str, Any]:
 
     capo = data.get("capo", 0)
     tuning = list(data.get("tuning", STANDARD_TUNING))
-    frets = data.get("frets", 24)
+    frets = data.get("frets", DEFAULT_FRET_COUNT)
     title = data.get("name", path.stem)
 
     raw_notes: list[dict[str, Any]] = []

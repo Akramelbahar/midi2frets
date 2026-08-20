@@ -124,10 +124,26 @@ def build_chunk_index(
     return entries
 
 
+def load_usable_index(path: str | Path) -> set[str]:
+    """Read a `validate_dataset.py --write-usable-index` file into the set of
+    file paths it approves. That index is a VIEW over the already-processed
+    JSON -- a corpus whose only problem is unsupported >MAX_FRET notes can be
+    trained on through it without reparsing a single Guitar Pro file. Paths
+    are normalised (absolute, case-folded on Windows) so an index written with
+    forward slashes still matches a glob result written with backslashes."""
+    blob = json.loads(Path(path).read_text(encoding="utf-8"))
+    return {_norm_path(e["path"]) for e in blob.get("files", [])}
+
+
+def _norm_path(p: str | Path) -> str:
+    return os.path.normcase(os.path.abspath(str(p)))
+
+
 def discover_and_split(
     data_dirs: list[str], seq_len: int, stride: int, cache_path: str,
     min_notes: int = 50, max_notes: int | None = None, max_files: int | None = None,
     val_frac: float = 0.1, seed: int = 42, log=print,
+    allow_paths: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     entries = build_chunk_index(data_dirs, seq_len, stride, cache_path, log=log)
     usable = [
@@ -135,6 +151,14 @@ def discover_and_split(
         if e["strings"] == 6 and e["n_chunks"] > 0 and e["n_notes"] >= min_notes
         and (max_notes is None or e["n_notes"] <= max_notes)
     ]
+    if allow_paths is not None:
+        before = len(usable)
+        usable = [e for e in usable if _norm_path(e["path"]) in allow_paths]
+        log(f"  [split] usable-index filter: {len(usable):,}/{before:,} indexed tracks kept")
+        if not usable:
+            raise RuntimeError(
+                "The usable index excluded every discovered track -- check that it was "
+                "written from the same --stream-dirs (paths are matched absolutely).")
 
     # §17: group by source_song_id BEFORE shuffling/splitting -- every track
     # of the same source GP file (song__t0.json, song__t1.json, ...) must
@@ -199,13 +223,19 @@ class StreamingGuitarDataset(IterableDataset):
         """Call once per epoch so file order + shuffle buffer reshuffle."""
         self.epoch = epoch
 
-    def _encode(self, chunk):
+    def _encode(self, item):
+        path, chunk = item
         return encode_chunk(
             chunk, self.seq_len, self.tuning_default, self.capo_default,
             augment=self.augment, transpose_range=self.transpose_range, drop_rate=self.drop_rate,
+            song_id=path,
         )
 
     def _chunks(self, files):
+        """Yields (source_path, chunk) so provenance survives the shuffle
+        buffer -- a fail-fast abort has to be able to name the tracks that
+        were in the offending batch, which is impossible once a chunk has
+        been detached from its file."""
         for path in files:
             try:
                 notes = compute_features(load_song(path)["notes"])
@@ -214,7 +244,7 @@ class StreamingGuitarDataset(IterableDataset):
             if not notes:
                 continue
             for chunk in _split_into_chunks(notes, self.seq_len, self.stride):
-                yield chunk
+                yield path, chunk
 
     def __iter__(self):
         files = list(self.files)
@@ -228,18 +258,18 @@ class StreamingGuitarDataset(IterableDataset):
         else:
             wseed = self.seed + self.epoch * 100003
 
-        gen = self._chunks(files)
+        gen = self._chunks(files)  # yields (path, chunk) pairs
         if not self.shuffle:
-            for chunk in gen:
-                yield self._encode(chunk)
+            for item in gen:
+                yield self._encode(item)
             return
 
         rng = random.Random(wseed)
         buf: list = []
-        for chunk in gen:
-            buf.append(chunk)
+        for item in gen:
+            buf.append(item)
             if len(buf) >= self.shuffle_buffer:
                 yield self._encode(buf.pop(rng.randrange(len(buf))))
         rng.shuffle(buf)
-        for chunk in buf:
-            yield self._encode(chunk)
+        for item in buf:
+            yield self._encode(item)

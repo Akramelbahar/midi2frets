@@ -42,6 +42,11 @@ from model import (
     GuitarStringTransformer, load_compatible_state_dict, trained_heads_explicit,
     HEAD_GROUPS, checkpoint_metadata, check_architecture_compatibility,
 )
+from fretboard import MAX_FRET
+from constraints import MASK_FLOOR, string_supervision_masks
+from metrics import (
+    classification_report, multilabel_report, regression_report,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -98,6 +103,165 @@ def _fmt_secs(s: float) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Fail-fast numeric guards
+#
+# A NaN loss is never a transient to be clipped, replaced, or trained through:
+# a single non-finite value turns every parameter NaN on the next
+# optimizer.step(), after which the run looks alive (it keeps logging, and a
+# constrained argmax over NaN logits still lands on SOME string, so accuracy
+# stays plausibly high) while learning nothing at all. These guards stop the
+# run at the first bad step and print exactly which component failed and which
+# corpus notes are implicated, so the next action is fixing data or code --
+# never lowering the learning rate.
+# --------------------------------------------------------------------------- #
+class NonFiniteLossError(RuntimeError):
+    """Raised the moment a loss component or gradient stops being finite."""
+
+
+def to_device(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
+    """Move a collated batch to `device`, passing non-tensor entries (the
+    per-chunk `song_id` provenance strings collate_fn keeps as a list)
+    through untouched."""
+    return {k: (v.to(device) if torch.is_tensor(v) else v) for k, v in batch.items()}
+
+
+def nonfinite_components(components: dict[str, Any]) -> list[str]:
+    """Names of the reported loss components that are not finite."""
+    bad = []
+    for k, v in components.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        if not math.isfinite(float(v)):
+            bad.append(k)
+    return bad
+
+
+def describe_batch_notes(
+    batch: dict[str, Any], max_notes: int = 12, max_fret: int = MAX_FRET,
+) -> list[str]:
+    """Human-readable dump of the notes most likely to be responsible for a
+    non-finite loss: those with no legal string, or with an illegal
+    ground-truth target, first; falling back to ordinary real notes if the
+    batch has none of either (in which case the cause is not the data)."""
+    masks = string_supervision_masks(
+        batch["pitch"], batch["y_string"], batch["pad_mask"],
+        batch["tuning"], batch["capo"], max_fret=max_fret,
+    )
+    suspicious = (masks["real"] & ~masks["has_any_legal"]) | (masks["labeled"] & ~masks["target_legal"])
+    idx = suspicious.nonzero(as_tuple=False)
+    if idx.numel() == 0:
+        idx = masks["real"].nonzero(as_tuple=False)
+
+    lines = []
+    for b, t in idx[:max_notes].tolist():
+        pitch = int(batch["pitch"][b, t].item())
+        string = int(batch["y_string"][b, t].item())
+        capo = int(batch["capo"][b, t].item())
+        tuning = [int(x) for x in batch["tuning"][b, t].tolist()]
+        y_fret = int(batch["y_fret"][b, t].item())
+        implied = (pitch - tuning[string] - capo) if 0 <= string < len(tuning) else None
+        legal = [s for s, open_pitch in enumerate(tuning) if 0 <= pitch - open_pitch - capo <= max_fret]
+        lines.append(
+            f"    [b={b} t={t}] pitch={pitch} string={string} y_fret={y_fret} capo={capo} "
+            f"tuning={tuning} fret_implied_by_target_string={implied} legal_strings={legal} "
+            f"suspicious={bool(suspicious[b, t].item())}"
+        )
+    return lines
+
+
+def batch_song_ids(batch: dict[str, Any]) -> list[str]:
+    ids = batch.get("song_id")
+    if not ids:
+        return []
+    return list(dict.fromkeys(ids))  # de-duplicated, order preserved
+
+
+def check_finite_loss(
+    total_loss: torch.Tensor, components: dict[str, Any], batch: dict[str, Any],
+    logger: Logger, step: int, epoch: int, dump_dir: str | Path | None = None,
+    max_fret: int = MAX_FRET,
+) -> None:
+    """Abort the run at the first non-finite loss, with the diagnosis attached."""
+    bad = nonfinite_components(components)
+    total_finite = bool(torch.isfinite(total_loss).all().item())
+    if total_finite and not bad:
+        return
+
+    logger.log("!" * 78)
+    logger.log(f"NON-FINITE LOSS at epoch {epoch} step {step} -- stopping immediately.")
+    logger.log(f"  total_loss = {total_loss.detach().float().item()}")
+    logger.log(f"  non-finite components: {bad or ['(total only)']}")
+    logger.log("  all components: " + ", ".join(f"{k}={v}" for k, v in components.items()))
+    songs = batch_song_ids(batch)
+    if songs:
+        logger.log(f"  source songs/tracks in this batch ({len(songs)}):")
+        for sid in songs[:16]:
+            logger.log(f"    {sid}")
+        if len(songs) > 16:
+            logger.log(f"    ... and {len(songs) - 16} more")
+    else:
+        logger.log("  source songs/tracks: (not recorded -- dataset produced no song_id)")
+    logger.log("  suspicious notes (pitch / string / fret / capo / tuning):")
+    for line in describe_batch_notes(batch, max_fret=max_fret):
+        logger.log(line)
+
+    dump_path = None
+    if dump_dir:
+        dump_path = Path(dump_dir) / f"bad_batch_step{step}.pt"
+        dump_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({
+            "batch": {k: (v.detach().cpu() if torch.is_tensor(v) else v) for k, v in batch.items()},
+            "components": components, "step": step, "epoch": epoch,
+        }, dump_path)
+        logger.log(f"  serialized offending batch -> {dump_path} "
+                   f"(reload with torch.load(..., weights_only=False))")
+
+    logger.log("!" * 78)
+    raise NonFiniteLossError(
+        f"non-finite loss at epoch {epoch} step {step}: components={bad or ['total']}"
+        + (f"; batch dumped to {dump_path}" if dump_path else "")
+    )
+
+
+def find_nonfinite_grads(model: torch.nn.Module, max_report: int = 8) -> list[str]:
+    """Names of parameters whose gradient is not finite. Costs ONE
+    device->host sync in the healthy case (the common one): every
+    parameter's finiteness is reduced on-device first, and the per-parameter
+    walk only happens once something is already known to be wrong."""
+    grads = [p.grad for p in model.parameters() if p.grad is not None]
+    if not grads:
+        return []
+    ok = torch.stack([torch.isfinite(g).all() for g in grads]).all()
+    if bool(ok.item()):
+        return []
+    bad = []
+    for name, param in model.named_parameters():
+        if param.grad is not None and not bool(torch.isfinite(param.grad).all().item()):
+            bad.append(name)
+            if len(bad) >= max_report:
+                break
+    return bad
+
+
+def check_finite_grads(model: torch.nn.Module, logger: Logger, step: int, epoch: int) -> None:
+    """Verify every gradient is finite BEFORE clipping and optimizer.step().
+    Clipping does not rescue a NaN gradient -- clip_grad_norm_ computes a NaN
+    total norm and then scales every gradient by NaN -- so a check placed
+    after it would be checking the wrong thing, and one placed after the step
+    would be too late."""
+    bad = find_nonfinite_grads(model)
+    if not bad:
+        return
+    logger.log("!" * 78)
+    logger.log(f"NON-FINITE GRADIENTS at epoch {epoch} step {step} -- stopping before optimizer.step().")
+    logger.log(f"  affected parameters (first {len(bad)} shown): {bad}")
+    logger.log("  the forward loss was finite, so the cause is in a backward path "
+               "(check for a masked-out branch that still carries a NaN, or an "
+               "exploding term), not in the corpus.")
+    logger.log("!" * 78)
+    raise NonFiniteLossError(f"non-finite gradients at epoch {epoch} step {step}: {bad}")
+
+# --------------------------------------------------------------------------- #
 # Loss
 # --------------------------------------------------------------------------- #
 def compute_loss(
@@ -109,39 +273,127 @@ def compute_loss(
     tuning: torch.Tensor,
     capo: torch.Tensor,
     playability_weight: float = 0.1,
+    max_fret: int = MAX_FRET,
 ) -> tuple[torch.Tensor, dict[str, float]]:
-    """
+    """String cross-entropy + differentiable playability, made unable to
+    return (or backprop) a non-finite value.
+
     logits: (B, T, 6); y_string: (B, T); pitch: (B, T);
     delta_bucket: (B, T); pad_mask: (B, T) True=pad;
     tuning: (B, T, 6); capo: (B, T)
-    """
-    frets = pitch.unsqueeze(-1) - tuning - capo.unsqueeze(-1)
-    valid = (frets >= 0) & (frets <= 24)
-    # Keep padding positions fully valid so softmax stays well-defined there
-    valid_for_mask = valid | pad_mask.unsqueeze(-1)
-    masked_logits = logits.masked_fill(~valid_for_mask, float("-inf"))
 
-    ce = F.cross_entropy(
-        masked_logits.view(-1, 6),
-        y_string.view(-1),
-        ignore_index=-100,
-        reduction="mean",
+    The three NaN sources this replaces, all of which a single malformed or
+    unsupported note in a batch of thousands was enough to trigger:
+
+      1. `masked_fill(..., -inf)` on a note with NO legal string under the
+         fret contract makes every one of its six logits -inf; log_softmax
+         then computes -inf - (-inf) = NaN for that row, and cross_entropy
+         returns NaN for the whole batch. Now such rows keep their raw
+         logits (a finite, if meaningless, distribution) and are excluded
+         from the CE by `usable` instead.
+      2. A note that IS playable but whose ANNOTATED string is illegal (its
+         own ground-truth fret exceeds MAX_FRET) put -inf at the target
+         index: CE = +inf, gradients = inf, parameters NaN one step later.
+         Merely swapping -inf for a finite floor -- the tempting "fix" --
+         would silently keep training on that note with a huge fabricated
+         penalty; it is dropped from supervision instead, and counted.
+      3. Even where the CE survived, `softmax` over an all -inf row produced
+         NaN probabilities, and the playability term multiplied them by a
+         zero mask -- 0 * NaN is NaN, so masking did not save it. The
+         softmax now runs over a provably non-degenerate row.
+
+    Both components are always finite: when a batch contains zero usable
+    notes (or zero valid adjacent pairs) the corresponding term is a
+    differentiable, graph-connected zero rather than 0/0.
+    """
+    masks = string_supervision_masks(
+        pitch, y_string, pad_mask, tuning, capo, max_fret=max_fret)
+    frets = masks["frets"]
+    legal = masks["legal"]
+    usable = masks["usable"]
+
+    # Illegal candidates get a large FINITE penalty, and a row with no legal
+    # candidate at all is left unmasked entirely -- so no softmax in this
+    # function can ever see a fully-masked row. See constraints.MASK_FLOOR.
+    masked_logits = logits.masked_fill(~masks["softmax_safe_mask"], MASK_FLOOR)
+
+    positioned = masks["real"] & masks["has_any_legal"]      # (B, T)
+    same_chord = delta_bucket[:, 1:] == 0
+    pair_mask_geom = positioned[:, 1:] & positioned[:, :-1] & (~same_chord)
+
+    # Every count this function reports (plus the two that decide a branch
+    # below) resolved in ONE device->host sync rather than one sync each.
+    #
+    # `notes_unlabeled` is how the corpus-level exclusion stays visible from
+    # inside training: dataset.string_supervision_targets already drops an
+    # unsupported note's label upstream, so by the time the loss sees the
+    # batch that note looks merely unlabeled. A REAL (non-padding) note with
+    # no label can only have come from that filter -- nothing else produces
+    # one -- so counting it here recovers the number without the dataset
+    # having to ship an extra tensor. `notes_illegal_target` /
+    # `notes_no_legal_string` then measure what the upstream filter MISSED
+    # (a stale cache, a hand-built batch, a future code path that bypasses
+    # encode_chunk): defence in depth, and both are expected to read 0 on a
+    # correctly encoded batch.
+    n_real, n_labeled, n_usable, n_no_legal, n_illegal_target = (
+        torch.stack([
+            masks["real"].sum(), masks["labeled"].sum(), usable.sum(),
+            (masks["real"] & ~masks["has_any_legal"]).sum(),
+            (masks["labeled"] & ~masks["target_legal"]).sum(),
+        ]).tolist()
     )
 
-    # Differentiable playability via expected hand position (no argmax)
-    safe_frets = frets.masked_fill(~valid, 0.0)
+    # ---- string cross-entropy over usable real notes only ---------------- #
+    ce_target = torch.where(usable, y_string, torch.full_like(y_string, -100))
+    if n_usable > 0:
+        ce = F.cross_entropy(
+            masked_logits.view(-1, masked_logits.size(-1)),
+            ce_target.view(-1),
+            ignore_index=-100,
+            reduction="mean",
+        )
+    else:
+        # Nothing to learn from this batch: a finite zero that still carries
+        # a gradient path (so DDP/autograd see every parameter as used).
+        ce = masked_logits.sum() * 0.0
+
+    # ---- differentiable playability via expected hand position ----------- #
+    # Physical criterion only (no label needed): a note contributes a hand
+    # position iff it is a real note that is playable SOMEWHERE. Notes with
+    # no legal string have a meaningless expected fret, so neither they nor
+    # the pairs they belong to may enter this term.
+    safe_frets = frets.masked_fill(~legal, 0).to(logits.dtype)
     p = F.softmax(masked_logits, dim=-1)
-    E_fret = (p * safe_frets).sum(-1)  # (B, T)
+    E_fret = (p * safe_frets).sum(-1)                        # (B, T)
+    E_fret = E_fret * positioned.to(E_fret.dtype)
 
     shift = E_fret[:, 1:] - E_fret[:, :-1]
-    playability = F.smooth_l1_loss(shift, torch.zeros_like(shift), reduction="none")
-    same_chord = delta_bucket[:, 1:] == 0
-    mask = (~pad_mask[:, 1:]) & (~same_chord) & (E_fret[:, 1:] > 0.5)
-    playability = (playability * mask.float()).sum() / (mask.sum().clamp_min(1.0))
+    per_pair = F.smooth_l1_loss(shift, torch.zeros_like(shift), reduction="none")
+    # `pair_mask_geom` is label-free; the open-string test needs E_fret, so
+    # it joins here rather than above.
+    pair_mask = pair_mask_geom & (E_fret[:, 1:] > 0.5)       # ignore open strings
+    n_pairs = int(pair_mask.sum().item())
+    if n_pairs > 0:
+        playability = (per_pair * pair_mask.to(per_pair.dtype)).sum() / pair_mask.sum().clamp_min(1.0)
+    else:
+        playability = per_pair.sum() * 0.0
 
     loss = ce + playability_weight * playability
-    return loss, {"loss": loss.item(), "ce": ce.item(), "playability": playability.item()}
 
+    stats = {
+        "loss": loss.item(), "ce": ce.item(), "playability": playability.item(),
+        # Data-contract counters: how much of this batch the fret contract
+        # actually excluded. Logged/aggregated by the training loop so an
+        # unusable corpus shows up as a number, not as a NaN.
+        "notes_real": n_real,
+        "notes_labeled": n_labeled,
+        "notes_usable": n_usable,
+        "notes_unlabeled": n_real - n_labeled,
+        "notes_no_legal_string": n_no_legal,
+        "notes_illegal_target": n_illegal_target,
+        "playability_pairs": n_pairs,
+    }
+    return loss, stats
 
 # --------------------------------------------------------------------------- #
 # Technique multi-task losses (additive, masked, same pattern as chord_ce)
@@ -780,6 +1032,7 @@ def evaluate(
     device: torch.device,
     max_batches: int | None = None,
     technique_weights: dict[str, float] | None = None,
+    max_fret: int = MAX_FRET,
 ) -> dict[str, Any]:
     model.eval()
     total_loss = total_ce = total_play = 0.0
@@ -792,32 +1045,42 @@ def evaluate(
     open_pred = 0                      # predicted notes played on an open string
     shift_sum = 0.0
     shift_count = 0
+    # Data-contract accounting, so a corpus problem shows up in validation
+    # rather than only as a training-time NaN.
+    contract = {"notes_real": 0, "notes_labeled": 0, "notes_usable": 0,
+                "notes_unlabeled": 0, "notes_no_legal_string": 0, "notes_illegal_target": 0}
 
     tw = technique_weights or {}
-    trans_correct = trans_total = 0
-    trans_freq = torch.zeros(S.NUM_TRANSITIONS)   # for the "always predict majority class" baseline
+    # Flat prediction/target streams for the imbalance-aware reports below.
+    # Accuracy alone cannot tell a real transition model apart from "always
+    # predict NONE" (~99% of notes), so every technique head is scored with
+    # per-class precision/recall/F1/support + macro-F1 + majority baseline
+    # (metrics.classification_report).
+    trans_preds: list[int] = []; trans_targets: list[int] = []
+    harm_preds: list[int] = []; harm_targets: list[int] = []
+    bt_preds: list[int] = []; bt_targets: list[int] = []
+    eff_preds: list[list[int]] = []; eff_targets: list[list[int]] = []
+    bend_mag_errors: list[float] = []
     trans_valid_count = trans_valid_total = 0     # physical-validity rate among argmax predictions
-    eff_correct = eff_total = 0
-    harm_correct = harm_total = 0
-    bend_type_correct = bend_type_total = 0
-    bend_mag_abs_err = bend_mag_count = 0.0
 
     for batch in loader:
         if max_batches is not None and n_batches >= max_batches:
             break
-        batch = {k: v.to(device) for k, v in batch.items()}
+        batch = to_device(batch, device)
         logits, technique_logits = model(
             {k: batch[k] for k in FEATURE_KEYS}, batch["pad_mask"], return_technique=True,
             transition_src_offset=batch["transition_src_offset"], transition_has_source=batch["transition_has_source"],
         )
         _, m = compute_loss(
             logits, batch["y_string"], batch["pitch"], batch["delta_bucket"],
-            batch["pad_mask"], batch["tuning"], batch["capo"],
+            batch["pad_mask"], batch["tuning"], batch["capo"], max_fret=max_fret,
         )
         extra, tm = technique_losses(technique_logits, batch, tw)
         m["loss"] = m["loss"] + extra.item()
         m.update(tm)
         total_loss += m["loss"]; total_ce += m["ce"]; total_play += m["playability"]
+        for key in contract:
+            contract[key] += m[key]
         n_batches += 1
 
         # ---- technique metrics ----
@@ -825,10 +1088,8 @@ def evaluate(
         trans_keep = y_trans != -100
         if trans_keep.any():
             trans_pred = technique_logits["transition"].argmax(-1)
-            trans_correct += ((trans_pred == y_trans) & trans_keep).sum().item()
-            trans_total += trans_keep.sum().item()
-            for cid in y_trans[trans_keep].tolist():
-                trans_freq[cid] += 1
+            trans_preds.extend(trans_pred[trans_keep].tolist())
+            trans_targets.extend(y_trans[trans_keep].tolist())
             idx = torch.arange(y_trans.size(1), device=device).unsqueeze(0).expand_as(y_trans)
             src_idx = (idx + batch["transition_src_offset"]).clamp(0, y_trans.size(1) - 1)
             src_fret = torch.gather(batch["y_fret"], 1, src_idx)
@@ -842,39 +1103,42 @@ def evaluate(
 
         eff_mask = batch["y_effects_mask"] > 0
         if eff_mask.any():
-            eff_pred = (torch.sigmoid(technique_logits["effects"]) > 0.5).float()
-            hit = (eff_pred == batch["y_effects"]).float() * eff_mask.unsqueeze(-1)
-            eff_correct += hit.sum().item()
-            eff_total += (eff_mask.unsqueeze(-1).expand_as(hit)).sum().item()
+            eff_pred = (torch.sigmoid(technique_logits["effects"]) > 0.5).long()
+            eff_preds.extend(eff_pred[eff_mask].tolist())
+            eff_targets.extend(batch["y_effects"][eff_mask].long().tolist())
 
         y_harm = batch["y_harmonic"]
         harm_keep = y_harm != -100
         if harm_keep.any():
             harm_pred = technique_logits["harmonic"].argmax(-1)
-            harm_correct += ((harm_pred == y_harm) & harm_keep).sum().item()
-            harm_total += harm_keep.sum().item()
+            harm_preds.extend(harm_pred[harm_keep].tolist())
+            harm_targets.extend(y_harm[harm_keep].tolist())
 
         y_bt = batch["y_bend_type"]
         bt_keep = y_bt != -100
         if bt_keep.any():
             bt_pred = technique_logits["bend_type"].argmax(-1)
-            bend_type_correct += ((bt_pred == y_bt) & bt_keep).sum().item()
-            bend_type_total += bt_keep.sum().item()
+            bt_preds.extend(bt_pred[bt_keep].tolist())
+            bt_targets.extend(y_bt[bt_keep].tolist())
 
         bm_mask = batch["y_bend_mask"] > 0
         if bm_mask.any():
-            err = (technique_logits["bend_magnitude"] - batch["y_bend_magnitude"]).abs() * bm_mask
-            bend_mag_abs_err += err.sum().item()
-            bend_mag_count += bm_mask.sum().item()
+            err = (technique_logits["bend_magnitude"] - batch["y_bend_magnitude"]).abs()
+            bend_mag_errors.extend(err[bm_mask].tolist())
 
-        pitch = batch["pitch"]; tuning = batch["tuning"]; capo = batch["capo"]
-        frets = pitch.unsqueeze(-1) - tuning - capo.unsqueeze(-1)      # (B, T, 6)
-        valid = (frets >= 0) & (frets <= 24)
-        masked = logits.masked_fill(~(valid | batch["pad_mask"].unsqueeze(-1)), float("-inf"))
+        # ---- string metrics, over the SAME usable-note definition the loss
+        # uses (constraints.string_supervision_masks) -- an unsupported note
+        # is neither a hit nor a miss, it is not an example at all, and no
+        # row is ever argmax'ed over six -inf entries.
+        masks = string_supervision_masks(
+            batch["pitch"], batch["y_string"], batch["pad_mask"],
+            batch["tuning"], batch["capo"], max_fret=max_fret,
+        )
+        frets, valid, keep = masks["frets"], masks["legal"], masks["usable"]
+        masked = logits.masked_fill(~masks["softmax_safe_mask"], MASK_FLOOR)
         preds = masked.argmax(-1)                                       # (B, T)
 
         y = batch["y_string"]
-        keep = y != -100
         hit = (preds == y) & keep
         correct += hit.sum().item(); total += keep.sum().item()
 
@@ -905,7 +1169,16 @@ def evaluate(
 
     n = max(1, n_batches)
     per_string_acc = (per_string_correct / per_string_total.clamp_min(1)).tolist()
-    trans_majority_baseline = (trans_freq.max() / trans_freq.sum()).item() if trans_freq.sum() > 0 else 0.0
+
+    trans_report = classification_report(
+        trans_preds, trans_targets, S.NUM_TRANSITIONS, S.TRANSITIONS)
+    harm_report = classification_report(
+        harm_preds, harm_targets, S.NUM_HARMONICS, S.HARMONICS)
+    bt_report = classification_report(
+        bt_preds, bt_targets, S.NUM_BEND_TYPES, S.BEND_TYPES)
+    eff_report = multilabel_report(eff_preds, eff_targets, S.NOTE_EFFECTS)
+    bend_mag_report = regression_report(bend_mag_errors)
+
     return {
         "loss": total_loss / n,
         "ce": total_ce / n,
@@ -917,20 +1190,73 @@ def evaluate(
         "open_pred_frac": open_pred / total if total else 0.0,
         "mean_hand_shift": shift_sum / shift_count if shift_count else 0.0,
         "notes_evaluated": total,
+        "data_contract": {
+            **contract,
+            # Denominator is REAL notes, not labeled ones: the point is what
+            # fraction of the music the contract cannot supervise, and
+            # measuring that against the already-filtered labeled count would
+            # report 0% by construction.
+            "unusable_frac": (
+                1.0 - contract["notes_usable"] / contract["notes_real"]
+                if contract["notes_real"] else 0.0),
+        },
         "technique": {
-            "transition_acc": trans_correct / trans_total if trans_total else None,
-            "transition_support": trans_total,
-            "transition_majority_baseline": trans_majority_baseline,
+            # The plain *_acc keys are kept for existing metrics.jsonl
+            # consumers; the *_report / *_macro_f1 entries are what should
+            # actually be read for these heavily imbalanced heads.
+            "transition_acc": trans_report["accuracy"],
+            "transition_support": trans_report["support"],
+            "transition_majority_baseline": trans_report["majority_baseline"] or 0.0,
+            "transition_macro_f1": trans_report["macro_f1"],
+            "transition_report": trans_report,
             "transition_physical_validity_rate": trans_valid_count / trans_valid_total if trans_valid_total else None,
-            "effects_acc": eff_correct / eff_total if eff_total else None,
-            "effects_support": eff_total,
-            "harmonic_acc": harm_correct / harm_total if harm_total else None,
-            "harmonic_support": harm_total,
-            "bend_type_acc": bend_type_correct / bend_type_total if bend_type_total else None,
-            "bend_type_support": bend_type_total,
-            "bend_magnitude_mae": bend_mag_abs_err / bend_mag_count if bend_mag_count else None,
+            "effects_acc": eff_report["micro_accuracy"],
+            "effects_support": eff_report["support"],
+            "effects_macro_f1": eff_report["macro_f1"],
+            "effects_report": eff_report,
+            "harmonic_acc": harm_report["accuracy"],
+            "harmonic_support": harm_report["support"],
+            "harmonic_macro_f1": harm_report["macro_f1"],
+            "harmonic_report": harm_report,
+            "bend_type_acc": bt_report["accuracy"],
+            "bend_type_support": bt_report["support"],
+            "bend_type_macro_f1": bt_report["macro_f1"],
+            "bend_type_report": bt_report,
+            # N/A (None), never NaN, when no bend was labeled in this split.
+            "bend_magnitude_mae": bend_mag_report["mae"],
+            "bend_magnitude_report": bend_mag_report,
         },
     }
+
+def _pct(x: float | None) -> str:
+    """Percentages that say N/A instead of printing a NaN or a fake 0.0%."""
+    return "N/A" if x is None else f"{x * 100:.2f}%"
+
+
+def _log_class_report(logger: Logger, head: str, rep: dict[str, Any], top_k: int = 6) -> None:
+    """One head's imbalance-aware summary. Accuracy is printed next to the
+    majority-class baseline it has to beat, and macro-F1 next to it, because
+    for these vocabularies (>99% NONE) accuracy alone cannot distinguish a
+    working head from a constant predictor."""
+    if not rep or not rep.get("support"):
+        logger.log(f"        {head}: no labeled examples in this split (N/A)")
+        return
+    verdict = ""
+    if rep["accuracy"] is not None and rep["majority_baseline"] is not None:
+        delta = rep["accuracy"] - rep["majority_baseline"]
+        verdict = f" [{'+' if delta >= 0 else ''}{delta * 100:.2f}pp vs baseline]"
+    logger.log(
+        f"        {head}: acc {_pct(rep['accuracy'])} | macro-F1 {_pct(rep['macro_f1'])} | "
+        f"majority baseline {_pct(rep['majority_baseline'])} "
+        f"(class {rep.get('majority_class_name')}) | n={rep['support']:,}{verdict}"
+    )
+    # Rarest-first: the classes accuracy hides are exactly the ones worth seeing.
+    present = [c for c in rep["per_class"] if c["support"] > 0]
+    for c in sorted(present, key=lambda c: c["support"])[:top_k]:
+        logger.log(
+            f"            {c['name']:<22} P {_pct(c['precision'])} R {_pct(c['recall'])} "
+            f"F1 {_pct(c['f1'])} n={c['support']:,}"
+        )
 
 
 def log_insights(logger: Logger, tag: str, step: int, epoch: int, m: dict[str, Any], best_acc: float) -> None:
@@ -951,28 +1277,46 @@ def log_insights(logger: Logger, tag: str, step: int, epoch: int, m: dict[str, A
         f"mean hand shift {m['mean_hand_shift']:.2f} frets | "
         f"weakest string s{worst} ({ps[worst]*100:.1f}%)"
     )
+    dc = m.get("data_contract") or {}
+    if dc.get("notes_real"):
+        logger.log(
+            f"        data contract: {dc['notes_usable']:,}/{dc['notes_real']:,} real notes usable "
+            f"({dc['unusable_frac']*100:.4f}% excluded | {dc['notes_unlabeled']:,} filtered upstream, "
+            f"{dc['notes_illegal_target']:,} illegal target, {dc['notes_no_legal_string']:,} unplayable)"
+        )
     if m["accuracy"] > best_acc:
         logger.log(f"        >> new best non-inflated? acc improved {best_acc*100:.2f}% -> {m['accuracy']*100:.2f}%")
 
     t = m.get("technique", {})
-    if t.get("transition_support"):
-        line = (f"        transition acc {t['transition_acc']*100:.2f}% "
-                f"(majority-class baseline {t['transition_majority_baseline']*100:.2f}%, "
-                f"n={t['transition_support']})")
-        if t.get("transition_physical_validity_rate") is not None:
-            line += f" | physical validity {t['transition_physical_validity_rate']*100:.2f}%"
-        logger.log(line)
-    if t.get("effects_support"):
-        logger.log(f"        effects acc {t['effects_acc']*100:.2f}% (n={t['effects_support']})")
-    if t.get("harmonic_support"):
-        logger.log(f"        harmonic acc {t['harmonic_acc']*100:.2f}% (n={t['harmonic_support']})")
-    if t.get("bend_type_support"):
-        line = f"        bend_type acc {t['bend_type_acc']*100:.2f}% (n={t['bend_type_support']})"
-        if t.get("bend_magnitude_mae") is not None:
-            line += f" | bend magnitude MAE {t['bend_magnitude_mae']:.3f} semitones"
-        logger.log(line)
-    logger.metric({"split": tag, "epoch": epoch, "step": step, **m})
+    _log_class_report(logger, "transition", t.get("transition_report", {}))
+    if t.get("transition_physical_validity_rate") is not None:
+        logger.log(f"            physical validity of predicted hammer/pull "
+                   f"{_pct(t['transition_physical_validity_rate'])}")
+    _log_class_report(logger, "harmonic", t.get("harmonic_report", {}))
+    _log_class_report(logger, "bend_type", t.get("bend_type_report", {}))
 
+    eff = t.get("effects_report") or {}
+    if eff.get("support"):
+        logger.log(
+            f"        effects: micro-acc {_pct(eff['micro_accuracy'])} | macro-F1 {_pct(eff['macro_f1'])} | "
+            f"all-negative baseline {_pct(eff['all_negative_baseline'])} | n={eff['support']:,} notes"
+        )
+        for lab in sorted((l for l in eff["per_label"] if l["support"] > 0), key=lambda l: l["support"])[:6]:
+            logger.log(
+                f"            {lab['name']:<22} P {_pct(lab['precision'])} R {_pct(lab['recall'])} "
+                f"F1 {_pct(lab['f1'])} n={lab['support']:,}"
+            )
+    else:
+        logger.log("        effects: no labeled examples in this split (N/A)")
+
+    bm = t.get("bend_magnitude_report") or {}
+    if bm.get("support"):
+        logger.log(f"        bend magnitude: MAE {bm['mae']:.3f} RMSE {bm['rmse']:.3f} "
+                   f"max {bm['max_abs_error']:.3f} semitones | n={bm['support']:,}")
+    else:
+        logger.log("        bend magnitude: no valid examples in this split (N/A, not NaN)")
+
+    logger.metric({"split": tag, "epoch": epoch, "step": step, **m})
 
 # --------------------------------------------------------------------------- #
 # Schedule
@@ -998,6 +1342,13 @@ def main():
     parser.add_argument("--stream-dirs", nargs="+", default=["data/raw", "data/processed/gp_json"],
                         help="Dirs of JSON songs to stream from")
     parser.add_argument("--chunk-index", default="data/processed/chunk_index.json", help="Cached chunk index path")
+    parser.add_argument("--usable-index", default=None,
+                        help="A validate_dataset.py --write-usable-index file. Restricts streaming to "
+                             "the tracks it approves -- a cleaned training VIEW over the existing "
+                             "processed JSON, requiring no reparse of the Guitar Pro corpus. "
+                             "Per-NOTE exclusion happens at encode time regardless (see fretboard.py); "
+                             "this only drops whole tracks that are too damaged or too thin to be worth "
+                             "streaming.")
     parser.add_argument("--min-notes", type=int, default=50)
     parser.add_argument("--max-notes", type=int, default=0, help="0 = no cap (streaming can handle big songs)")
     parser.add_argument("--max-files", type=int, default=0, help="0 = use all songs")
@@ -1010,6 +1361,14 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--wd", type=float, default=0.01)
     parser.add_argument("--grad-clip", type=float, default=1.0)
+    parser.add_argument("--max-fret", type=int, default=MAX_FRET,
+                        help="Fret ceiling of the supported instrument (fretboard.py owns the "
+                             "product default of 24). Notes whose ground-truth string implies a "
+                             "fret above this are excluded from string supervision and counted, "
+                             "never relabelled.")
+    parser.add_argument("--bad-batch-dir", default=None,
+                        help="If set, a non-finite loss serializes the offending batch here "
+                             "(torch.save) before aborting, for offline reproduction.")
     parser.add_argument("--seq-len", type=int, default=128)
     parser.add_argument("--stride", type=int, default=64)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -1125,12 +1484,18 @@ def main():
 
     if args.stream:
         # ---- Streaming: whole corpus, song-level split, no RAM blow-up ---- #
-        from streaming_dataset import StreamingGuitarDataset, discover_and_split
+        from streaming_dataset import StreamingGuitarDataset, discover_and_split, load_usable_index
         logger.log(f"Indexing songs under {args.stream_dirs} (cached at {args.chunk_index}) ...")
+        allow_paths = None
+        if args.usable_index:
+            allow_paths = load_usable_index(args.usable_index)
+            logger.log(f"Restricting training to the {len(allow_paths):,} tracks approved by "
+                       f"{args.usable_index} (a view over the EXISTING processed JSON -- no reparse)")
         train_entries, val_entries = discover_and_split(
             args.stream_dirs, args.seq_len, args.stride, args.chunk_index,
             min_notes=args.min_notes, max_notes=args.max_notes or None,
             max_files=args.max_files or None, val_frac=args.val_frac, log=logger.log,
+            allow_paths=allow_paths,
         )
         if not train_entries:
             raise RuntimeError("No usable songs found -- check --stream-dirs / filters.")
@@ -1219,7 +1584,8 @@ def main():
     def run_eval(epoch: int) -> dict[str, Any]:
         nonlocal best_val, best_acc
         mb = args.eval_batches or None
-        m = evaluate(model, val_loader, args.device, max_batches=mb, technique_weights=technique_weights)
+        m = evaluate(model, val_loader, args.device, max_batches=mb,
+                     technique_weights=technique_weights, max_fret=args.max_fret)
         log_insights(logger, "val", global_step, epoch, m, best_acc)
         if m["loss"] < best_val:
             best_val = m["loss"]
@@ -1254,13 +1620,18 @@ def main():
             stream_ds.set_epoch(epoch)  # reshuffle file order + buffer each epoch
         ep_t0 = time.time()
         win_t0 = time.time()
+        # Per-epoch data-contract totals (how much of the corpus the fret
+        # contract actually excluded) -- reported at epoch end.
+        epoch_contract = {"notes_real": 0, "notes_labeled": 0, "notes_usable": 0,
+                          "notes_unlabeled": 0, "notes_no_legal_string": 0,
+                          "notes_illegal_target": 0}
         run_loss = run_ce = run_play = 0.0
         run_notes = 0
         win_steps = 0
         steps_in_epoch = steps_per_epoch  # exact (map) or estimate (stream)
 
         for i, batch in enumerate(train_loader, 1):
-            batch = {k: v.to(args.device) for k, v in batch.items()}
+            batch = to_device(batch, args.device)
             optimizer.zero_grad()
             logits, chord_logits, technique_logits = model(
                 {k: batch[k] for k in FEATURE_KEYS}, batch["pad_mask"], return_chord=True,
@@ -1269,7 +1640,7 @@ def main():
             )
             loss, m = compute_loss(
                 logits, batch["y_string"], batch["pitch"], batch["delta_bucket"],
-                batch["pad_mask"], batch["tuning"], batch["capo"],
+                batch["pad_mask"], batch["tuning"], batch["capo"], max_fret=args.max_fret,
             )
             # Auxiliary chord loss on notes with chord annotations
             if args.chord_weight > 0 and bool((batch["y_chord_root"] != -100).any()):
@@ -1295,7 +1666,15 @@ def main():
                 loss = loss + args.physical_weight * phys
                 m["physical"] = phys.item()
 
+            # Fail fast, BEFORE the bad value can reach the parameters: one
+            # NaN step silently NaNs every weight, after which the run keeps
+            # logging plausible-looking numbers forever.
+            m["total"] = loss.item()
+            check_finite_loss(loss, m, batch, logger, global_step + 1, epoch,
+                              dump_dir=args.bad_batch_dir, max_fret=args.max_fret)
+
             loss.backward()
+            check_finite_grads(model, logger, global_step + 1, epoch)
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
             scheduler.step()
@@ -1304,6 +1683,8 @@ def main():
             n_notes = int((~batch["pad_mask"]).sum().item())
             run_loss += m["loss"]; run_ce += m["ce"]; run_play += m["playability"]
             run_notes += n_notes; win_steps += 1
+            for key in epoch_contract:
+                epoch_contract[key] += m.get(key, 0)
 
             # Live in-place status every step -- makes slow (CPU) runs feel real-time
             done = min(1.0, i / max(1, steps_in_epoch))
@@ -1334,6 +1715,18 @@ def main():
 
             if args.eval_every and global_step % args.eval_every == 0:
                 run_eval(epoch)
+
+        if epoch_contract["notes_real"]:
+            excluded = epoch_contract["notes_real"] - epoch_contract["notes_usable"]
+            logger.log(
+                f"   [data contract] max_fret={args.max_fret} | "
+                f"{epoch_contract['notes_usable']:,}/{epoch_contract['notes_real']:,} real notes supervised the "
+                f"string head ({100.0 * excluded / epoch_contract['notes_real']:.4f}% excluded: "
+                f"{epoch_contract['notes_unlabeled']:,} filtered by the dataset, "
+                f"{epoch_contract['notes_illegal_target']:,} illegal target string and "
+                f"{epoch_contract['notes_no_legal_string']:,} unplayable that reached the loss)"
+            )
+            logger.metric({"split": "data_contract", "epoch": epoch, **epoch_contract})
 
         # End-of-epoch validation
         m = run_eval(epoch)
