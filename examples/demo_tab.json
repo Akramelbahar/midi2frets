@@ -1,0 +1,3684 @@
+[
+  {
+    "time_ticks": 0,
+    "duration_ticks": 480,
+    "pitch": 43,
+    "string_index_internal": 5,
+    "string_number_guitar": 6,
+    "fret": 3
+  },
+  {
+    "time_ticks": 480,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0,
+    "chord": {
+      "text": "D5"
+    }
+  },
+  {
+    "time_ticks": 960,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 1440,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 1920,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 2400,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 3360,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 3840,
+    "duration_ticks": 480,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3
+  },
+  {
+    "time_ticks": 4320,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 4800,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 5280,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 5760,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 6240,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 6720,
+    "duration_ticks": 480,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3
+  },
+  {
+    "time_ticks": 7200,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 7680,
+    "duration_ticks": 480,
+    "pitch": 47,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 2
+  },
+  {
+    "time_ticks": 7680,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 8160,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 8640,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 9120,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 9600,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 10080,
+    "duration_ticks": 960,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4,
+    "chord": {
+      "text": "D\u266f5"
+    }
+  },
+  {
+    "time_ticks": 11040,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 11520,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 12000,
+    "duration_ticks": 480,
+    "pitch": 47,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 2
+  },
+  {
+    "time_ticks": 12480,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 12960,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B"
+    }
+  },
+  {
+    "time_ticks": 12960,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 8
+  },
+  {
+    "time_ticks": 13440,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 13440,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 8
+  },
+  {
+    "time_ticks": 13920,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 14400,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 14880,
+    "duration_ticks": 240,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 14880,
+    "duration_ticks": 240,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 15120,
+    "duration_ticks": 240,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 15120,
+    "duration_ticks": 240,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 15360,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 15360,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 15360,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 15840,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 16320,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 16800,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 17280,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 17760,
+    "duration_ticks": 960,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0,
+    "chord": {
+      "text": "E5"
+    }
+  },
+  {
+    "time_ticks": 18720,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 19200,
+    "duration_ticks": 480,
+    "pitch": 65,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 1
+  },
+  {
+    "time_ticks": 19680,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 20160,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 20640,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 21120,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 21600,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 22080,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 22560,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 23040,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 23520,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 24000,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 24480,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 24960,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 25440,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 25920,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 26400,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 26880,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 27360,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 27840,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 28320,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 28800,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 29280,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 29760,
+    "duration_ticks": 960,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 30720,
+    "duration_ticks": 480,
+    "pitch": 43,
+    "string_index_internal": 5,
+    "string_number_guitar": 6,
+    "fret": 3
+  },
+  {
+    "time_ticks": 31200,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 31680,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 32160,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 32640,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 33120,
+    "duration_ticks": 960,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 34080,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 34560,
+    "duration_ticks": 960,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0,
+    "chord": {
+      "text": "Bm"
+    }
+  },
+  {
+    "time_ticks": 34560,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 35520,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 36000,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0,
+    "chord": {
+      "text": "D5"
+    }
+  },
+  {
+    "time_ticks": 36480,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 36960,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 37440,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 37920,
+    "duration_ticks": 240,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 38160,
+    "duration_ticks": 240,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 38400,
+    "duration_ticks": 480,
+    "pitch": 47,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 2
+  },
+  {
+    "time_ticks": 38400,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 38880,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 39360,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 40320,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 40800,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 41760,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 42240,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 42720,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 43200,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 43680,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 44160,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 44640,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 45120,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 45600,
+    "duration_ticks": 240,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 45840,
+    "duration_ticks": 240,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 46080,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 46560,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 47040,
+    "duration_ticks": 960,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 48000,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 48480,
+    "duration_ticks": 960,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0,
+    "chord": {
+      "text": "E5"
+    }
+  },
+  {
+    "time_ticks": 49440,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C"
+    }
+  },
+  {
+    "time_ticks": 49920,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 49920,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 50400,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 50880,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 51360,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 51840,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 52320,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 52800,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 53280,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 53760,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 54240,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 54720,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 55200,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 55680,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 56160,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 56640,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 57120,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 57600,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 57600,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 8
+  },
+  {
+    "time_ticks": 58080,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 58560,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 59040,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 59520,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 60000,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 60480,
+    "duration_ticks": 960,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 61440,
+    "duration_ticks": 480,
+    "pitch": 43,
+    "string_index_internal": 5,
+    "string_number_guitar": 6,
+    "fret": 3,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 61920,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 62400,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 62880,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 63360,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 63840,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 64800,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 65280,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 65760,
+    "duration_ticks": 480,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3
+  },
+  {
+    "time_ticks": 66240,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 66720,
+    "duration_ticks": 480,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3,
+    "chord": {
+      "text": "D5"
+    }
+  },
+  {
+    "time_ticks": 67200,
+    "duration_ticks": 480,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3
+  },
+  {
+    "time_ticks": 67680,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 68160,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 68640,
+    "duration_ticks": 240,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B"
+    }
+  },
+  {
+    "time_ticks": 68880,
+    "duration_ticks": 240,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 69120,
+    "duration_ticks": 480,
+    "pitch": 47,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 2
+  },
+  {
+    "time_ticks": 69120,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 69600,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 70080,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 70560,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 71040,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 71520,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 72000,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 72480,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 72960,
+    "duration_ticks": 480,
+    "pitch": 71,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 7
+  },
+  {
+    "time_ticks": 73440,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 73920,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4,
+    "chord": {
+      "text": "D\u266fm"
+    }
+  },
+  {
+    "time_ticks": 74400,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 74400,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 74880,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 74880,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 75360,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 75840,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 76320,
+    "duration_ticks": 240,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 76560,
+    "duration_ticks": 240,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 76800,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 76800,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 77280,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 77760,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 78240,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 78720,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 79200,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 79680,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 80160,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 80640,
+    "duration_ticks": 480,
+    "pitch": 72,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 8
+  },
+  {
+    "time_ticks": 81120,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 81600,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 82080,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 82560,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 83040,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 83520,
+    "duration_ticks": 480,
+    "pitch": 72,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 8
+  },
+  {
+    "time_ticks": 84000,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 84480,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 84960,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 85440,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 85920,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 86400,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 86880,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 87360,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 87840,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 88320,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 88800,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 89280,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 89760,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 90240,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 90720,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 91200,
+    "duration_ticks": 960,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 91200,
+    "duration_ticks": 960,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 122880,
+    "duration_ticks": 480,
+    "pitch": 43,
+    "string_index_internal": 5,
+    "string_number_guitar": 6,
+    "fret": 3
+  },
+  {
+    "time_ticks": 123360,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 123840,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 124320,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 124800,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 125280,
+    "duration_ticks": 960,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 126240,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0,
+    "chord": {
+      "text": "D5"
+    }
+  },
+  {
+    "time_ticks": 126720,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 127200,
+    "duration_ticks": 480,
+    "pitch": 43,
+    "string_index_internal": 5,
+    "string_number_guitar": 6,
+    "fret": 3,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 127680,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 128160,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 128640,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 129120,
+    "duration_ticks": 960,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0,
+    "chord": {
+      "text": "D5"
+    }
+  },
+  {
+    "time_ticks": 130080,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 130560,
+    "duration_ticks": 480,
+    "pitch": 47,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 2
+  },
+  {
+    "time_ticks": 130560,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 131040,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 131520,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 132480,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 132960,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 133920,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 134400,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 134880,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 135360,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 135840,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 136320,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 136800,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 137280,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 137760,
+    "duration_ticks": 240,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 138000,
+    "duration_ticks": 240,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 138240,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 138720,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 139200,
+    "duration_ticks": 960,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 140160,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 140640,
+    "duration_ticks": 960,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 141600,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 142080,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 142560,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 143040,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 143520,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 144000,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 144480,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 144960,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 145440,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 145920,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 146400,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 146880,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 147360,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 147840,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 148320,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 148800,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 149280,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 149760,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 150240,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 150720,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 151200,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 151680,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 152160,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 152640,
+    "duration_ticks": 960,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 153600,
+    "duration_ticks": 480,
+    "pitch": 43,
+    "string_index_internal": 5,
+    "string_number_guitar": 6,
+    "fret": 3
+  },
+  {
+    "time_ticks": 154080,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 154560,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 155040,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 155520,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 156000,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 156960,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 157440,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 157920,
+    "duration_ticks": 480,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3
+  },
+  {
+    "time_ticks": 158400,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 158880,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 159360,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 159840,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 160320,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 160800,
+    "duration_ticks": 240,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 160800,
+    "duration_ticks": 240,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 161040,
+    "duration_ticks": 240,
+    "pitch": 59,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 4,
+    "chord": {
+      "text": "B"
+    }
+  },
+  {
+    "time_ticks": 161040,
+    "duration_ticks": 240,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 161280,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 161280,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 4
+  },
+  {
+    "time_ticks": 161280,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 161760,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 162240,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 162720,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 163200,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 163680,
+    "duration_ticks": 960,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4,
+    "chord": {
+      "text": "D\u266f5"
+    }
+  },
+  {
+    "time_ticks": 164640,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 165120,
+    "duration_ticks": 480,
+    "pitch": 71,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 7
+  },
+  {
+    "time_ticks": 165600,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 166080,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 166560,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 167040,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 167520,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 168000,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 168480,
+    "duration_ticks": 240,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 168720,
+    "duration_ticks": 240,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 168960,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 168960,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 169440,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 169920,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 170400,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 170880,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0,
+    "chord": {
+      "text": "E5"
+    }
+  },
+  {
+    "time_ticks": 171360,
+    "duration_ticks": 960,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 172320,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 172800,
+    "duration_ticks": 480,
+    "pitch": 72,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 8
+  },
+  {
+    "time_ticks": 173280,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 173760,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 174240,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 174720,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 175200,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 175680,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 176160,
+    "duration_ticks": 240,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 176400,
+    "duration_ticks": 240,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 176640,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 177120,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 177120,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 177600,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 178080,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 178560,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 179040,
+    "duration_ticks": 960,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4,
+    "chord": {
+      "text": "D\u266f5"
+    }
+  },
+  {
+    "time_ticks": 180000,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 180480,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 180960,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 181440,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 181920,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 182400,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 182880,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 183360,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 183840,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 183840,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 276480,
+    "duration_ticks": 480,
+    "pitch": 43,
+    "string_index_internal": 5,
+    "string_number_guitar": 6,
+    "fret": 3
+  },
+  {
+    "time_ticks": 276960,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 277440,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 277920,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 278400,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 278880,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 279840,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0,
+    "chord": {
+      "text": "D5"
+    }
+  },
+  {
+    "time_ticks": 280320,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 280800,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 281280,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 281760,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 282240,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 282720,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 283680,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 283680,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 284160,
+    "duration_ticks": 480,
+    "pitch": 47,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 2
+  },
+  {
+    "time_ticks": 284160,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 284160,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 8
+  },
+  {
+    "time_ticks": 284640,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 285120,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 285600,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 286080,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 286560,
+    "duration_ticks": 960,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4,
+    "chord": {
+      "text": "D\u266f5"
+    }
+  },
+  {
+    "time_ticks": 287520,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 288000,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 288480,
+    "duration_ticks": 480,
+    "pitch": 47,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 2
+  },
+  {
+    "time_ticks": 288960,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 289440,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 289920,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 290400,
+    "duration_ticks": 960,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4,
+    "chord": {
+      "text": "D\u266f5"
+    }
+  },
+  {
+    "time_ticks": 291360,
+    "duration_ticks": 480,
+    "pitch": 54,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 4
+  },
+  {
+    "time_ticks": 291840,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 292320,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 292800,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 293280,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 293760,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 294240,
+    "duration_ticks": 960,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0,
+    "chord": {
+      "text": "E5"
+    }
+  },
+  {
+    "time_ticks": 295200,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 295680,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 296160,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 296640,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 297120,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 297600,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 298080,
+    "duration_ticks": 960,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0,
+    "chord": {
+      "text": "E5"
+    }
+  },
+  {
+    "time_ticks": 299040,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 299520,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 300000,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 300480,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 300960,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 301440,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 301920,
+    "duration_ticks": 960,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4,
+    "chord": {
+      "text": "D\u266f5"
+    }
+  },
+  {
+    "time_ticks": 302880,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 303360,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 303840,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3
+  },
+  {
+    "time_ticks": 304320,
+    "duration_ticks": 960,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 305280,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 305760,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 306240,
+    "duration_ticks": 960,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 307200,
+    "duration_ticks": 480,
+    "pitch": 43,
+    "string_index_internal": 5,
+    "string_number_guitar": 6,
+    "fret": 3
+  },
+  {
+    "time_ticks": 307680,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 308160,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 308640,
+    "duration_ticks": 480,
+    "pitch": 50,
+    "string_index_internal": 3,
+    "string_number_guitar": 4,
+    "fret": 0
+  },
+  {
+    "time_ticks": 309120,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0
+  },
+  {
+    "time_ticks": 309600,
+    "duration_ticks": 960,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 310560,
+    "duration_ticks": 480,
+    "pitch": 55,
+    "string_index_internal": 2,
+    "string_number_guitar": 3,
+    "fret": 0,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 311040,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 311520,
+    "duration_ticks": 480,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3
+  },
+  {
+    "time_ticks": 312000,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 312480,
+    "duration_ticks": 480,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3,
+    "chord": {
+      "text": "D5"
+    }
+  },
+  {
+    "time_ticks": 312960,
+    "duration_ticks": 480,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3
+  },
+  {
+    "time_ticks": 313440,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 313920,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 314400,
+    "duration_ticks": 240,
+    "pitch": 62,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 3
+  },
+  {
+    "time_ticks": 314640,
+    "duration_ticks": 240,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 314880,
+    "duration_ticks": 480,
+    "pitch": 47,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 2
+  },
+  {
+    "time_ticks": 315360,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 315840,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 316320,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 316800,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 317280,
+    "duration_ticks": 960,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2,
+    "chord": {
+      "text": "F\u266f5"
+    }
+  },
+  {
+    "time_ticks": 318240,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 318720,
+    "duration_ticks": 480,
+    "pitch": 71,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 7
+  },
+  {
+    "time_ticks": 319200,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 319680,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 320160,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0,
+    "chord": {
+      "text": "B5"
+    }
+  },
+  {
+    "time_ticks": 320640,
+    "duration_ticks": 480,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 321120,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  },
+  {
+    "time_ticks": 321600,
+    "duration_ticks": 480,
+    "pitch": 66,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 2
+  },
+  {
+    "time_ticks": 322080,
+    "duration_ticks": 240,
+    "pitch": 59,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 0
+  },
+  {
+    "time_ticks": 322320,
+    "duration_ticks": 240,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 322560,
+    "duration_ticks": 480,
+    "pitch": 48,
+    "string_index_internal": 4,
+    "string_number_guitar": 5,
+    "fret": 3,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 323040,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 323520,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 324000,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1
+  },
+  {
+    "time_ticks": 324480,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0,
+    "chord": {
+      "text": "E5"
+    }
+  },
+  {
+    "time_ticks": 324960,
+    "duration_ticks": 960,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 325920,
+    "duration_ticks": 480,
+    "pitch": 60,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 1,
+    "chord": {
+      "text": "C5"
+    }
+  },
+  {
+    "time_ticks": 326400,
+    "duration_ticks": 480,
+    "pitch": 72,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 8
+  },
+  {
+    "time_ticks": 326880,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 327360,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 327840,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3,
+    "chord": {
+      "text": "G5"
+    }
+  },
+  {
+    "time_ticks": 328320,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 328800,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 329280,
+    "duration_ticks": 480,
+    "pitch": 67,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 3
+  },
+  {
+    "time_ticks": 329760,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0,
+    "chord": {
+      "text": "E5"
+    }
+  },
+  {
+    "time_ticks": 330240,
+    "duration_ticks": 480,
+    "pitch": 64,
+    "string_index_internal": 0,
+    "string_number_guitar": 1,
+    "fret": 0
+  },
+  {
+    "time_ticks": 330720,
+    "duration_ticks": 480,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4,
+    "chord": {
+      "text": "D\u266f5"
+    }
+  },
+  {
+    "time_ticks": 331200,
+    "duration_ticks": 2880,
+    "pitch": 63,
+    "string_index_internal": 1,
+    "string_number_guitar": 2,
+    "fret": 4
+  }
+]

@@ -518,6 +518,103 @@ real corpus during this session found 0 parse failures and 0 validation errors
 across 453 guitar tracks (see §15) — this is NOT the same as running the full 15k-file
 regeneration, which remains a follow-up step for you to run (§16).
 
+### The fretboard data contract (`src/fretboard.py`)
+
+midi2Frets officially supports a **fixed 24-fret, 6-string guitar**. That decision
+lives in exactly one module, `src/fretboard.py`, and every layer imports it:
+parser/schema (`metadata["frets"]`, `fret_count` defaults), dataset, training loss,
+evaluation, inference/decoding, the multi-guitar candidate generator, and the corpus
+validator. A per-track `fret_count` may only ever *tighten* the fretboard
+(`resolve_max_fret`); nothing may raise it above `MAX_FRET`.
+
+Fixed rather than variable, deliberately: fret is never predicted — it is always
+derived as `pitch - tuning[string] - capo` — so the fret count changes no tensor
+shape, only which `(pitch, string)` pairs are legal. And the parser records
+`metadata["frets"]` as a constant 24 for every Guitar Pro track (the real per-track
+fret count is not recovered from the source file), so "variable" would today mean
+"variable in name, 24 in fact".
+
+The consequence that matters:
+
+> A note whose annotated string implies a fret outside `[0, MAX_FRET]` is **not a
+> valid string-supervision example.**
+
+Such a note is excluded from the string cross-entropy deterministically
+(`dataset.string_supervision_targets` labels it `-100`) and **counted**. It is never
+relabelled onto a reachable string (that would fabricate ground truth the source
+never asserted) and never deleted from the sequence (it is real music, still valid
+model input, and still supervises the technique heads). Three distinct cases the
+pipeline keeps apart:
+
+| case | playable at all? | usable as a string label? | example |
+|---|---|---|---|
+| ordinary note | yes | yes | pitch 52 on string 3 = fret 2 |
+| illegal target string | yes | **no** | pitch 80 annotated on string 5 = fret 40 (but fret 16 on string 0) |
+| unplayable note | **no** | **no** | pitch 91 — above fret 24 of every string |
+
+**Why this was not cosmetic.** Before this contract existed, the training loss masked
+illegal strings with `-inf`. A note with no legal string became six `-inf` logits, and
+`log_softmax` turned that row into `NaN` (`-inf - -inf`); a note whose *target* was
+illegal put `-inf` at the target index, making cross-entropy `+inf`. Either way one
+note in a batch of thousands NaN'd the whole batch, then every parameter on the next
+`optimizer.step()`. Masking did not save the playability term either, because
+`0 * NaN` is `NaN`, not `0`. The run kept going and kept logging: a constrained
+`argmax` over NaN logits still lands on *some* string, so validation accuracy stayed
+in a plausible-looking range while nothing was being learned.
+
+Measured rate in a 600-file / 1.86 M-note sweep of the Guitar Pro corpus: 117 notes
+(0.0063 %) exceed fret 24, 98 are unplayable outright. That is ~1 in every 4 batches
+at `batch 32 × seq_len 128` — which is why the loss was NaN essentially from step one.
+
+`src/train.py::compute_loss` is now numerically closed: illegal candidates get a
+large **finite** floor (`constraints.MASK_FLOOR`), a row with no legal candidate is
+left unmasked entirely (it is excluded from every loss anyway, so no softmax ever
+sees a fully-masked row), the cross-entropy runs only over usable notes, the
+playability term only over adjacent pairs that are both physically positioned, and a
+batch with zero usable notes returns a differentiable finite zero rather than `0/0`.
+On clean data it reproduces the original objective exactly (regression-tested in
+`tests/test_train_loss_numerics.py`).
+
+Training also **fails fast**: `check_finite_loss` / `check_finite_grads` abort at the
+first non-finite value — before `clip_grad_norm_`, which cannot rescue a NaN gradient
+and merely spreads it — printing which component failed, the source songs/tracks in
+the batch, and the pitch/string/fret/capo/tuning of the implicated notes.
+`--bad-batch-dir DIR` additionally serializes the offending batch for offline
+reproduction.
+
+### Auditing a processed corpus (`src/validate_dataset.py`)
+
+Read-only; discards nothing. Run it against processed JSON *before* training:
+
+```bash
+python src/validate_dataset.py --dirs data/processed/gp_json data/raw \
+    --json-out reports/corpus_audit.json \
+    --write-usable-index data/processed/usable_index.json
+```
+
+It checks every note for finite/present numeric fields, a 6-entry tuning, an
+in-range string, `fret >= 0`, the pitch equation `pitch == tuning[string] + fret +
+capo`, `fret <= MAX_FRET`, at least one legal string, and a legal target string —
+then reports totals, percentages, fret/pitch/tuning/capo distributions, and the
+offending source files. Files that fail to load are *recorded*, never skipped
+silently.
+
+Reading the result: `pitch_equation_failed`, `bad_tuning`, `string_out_of_range`,
+`negative_fret`, or non-finite fields mean the **parser or the stored file is wrong**
+and the corpus must be regenerated. `fret_over_max`, `no_legal_string`,
+`illegal_target_string`, and `wrong_string_count` are expected corpus variety — they
+need no regeneration, only the exclusion the contract already applies, and
+`--write-usable-index` builds that training view over the existing JSON without
+reparsing a single Guitar Pro file — and `train.py --usable-index <file>` consumes
+it directly:
+
+```bash
+python src/train.py --stream --stream-dirs data/processed/gp_json     --usable-index data/processed/usable_index.json
+```
+
+Per-*note* exclusion happens at encode time regardless of the index; the index only
+drops whole tracks too damaged or too thin to be worth streaming.
+
 ## 7. Training
 
 ```powershell
@@ -938,6 +1035,13 @@ predictions — now including voice, a real bend curve, a learned transition-sou
 pointer, and beat-level pick direction (§3b) — run:
 
 ```bash
+# 0. Audit whatever processed JSON you already have (read-only, ~seconds/1000 files).
+#    If it reports zero pitch_equation_failed / bad_tuning / string_out_of_range /
+#    non_finite_field, the corpus is internally CORRECT and step 1 is only about
+#    picking up new technique FIELDS — unrepresentable >24-fret notes need no
+#    regeneration, only the exclusion the fret contract already applies (§6).
+python src/validate_dataset.py --dirs data/processed/gp_json --write-usable-index data/processed/usable_index.json
+
 # 1. Regenerate the corpus so every cached JSON carries the new technique fields
 #    (bundles the already-pending capo/track-split fix with the new extraction —
 #    one regeneration, not two). This is the one command in this README that

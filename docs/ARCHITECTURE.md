@@ -726,3 +726,250 @@ Fixing the CSP note-ordering bug (§2 -- the code sorted by `-pitch`, i.e. HIGHE
 - **`derive_role_hints`** (§10.15.3) is a genuinely lightweight per-event heuristic (lowest/highest/middle pitch), not real harmonic analysis -- documented as such, matching the spec's explicit "do not require full music-theory semantic understanding."
 - **`arrange` mode's multi-K search** is bounded (`arrange_search_margin`, default 2 extra K values) -- a deliberate, documented performance/quality tradeoff, not an exhaustive search over every possible guitar count.
 - **The candidate scorer** (§19, `model.forward_multi_guitar`) is unchanged by this pass and remains completely untrained -- every note-score hook this pass adds (arrangement-mode soft costs) composes ADDITIVELY with the existing (inert, since untrained) neural score term in `_backtrack_event`, never replacing it; the scorer's documented future feature list (register continuity, source track, candidate guitar count, etc.) is already producible from data this pass's diagnostics/stats now expose.
+
+
+## 11. The fretboard data contract and the NaN-loss fix (single-guitar training)
+
+A training run reported `loss = nan`, `ce = nan`, `playability = nan` from the very
+first logged step, while validation string accuracy still read ~72 %. This section
+records the root cause, the contract introduced to close it, and what was measured.
+
+### 11.1 Root cause: an implicit data contract that nothing enforced
+
+`train.py::compute_loss` masked physically impossible strings with `-inf` and hard-
+coded the fret ceiling as a literal `24`. Three failure modes followed, all triggered
+by real corpus notes:
+
+1. **No legal string.** A pitch above fret 24 of the *highest* string (MIDI > 88 in
+   standard tuning) has no legal string at all. All six logits became `-inf`;
+   `log_softmax` computed `-inf - (-inf)` = `NaN` for that row, and `cross_entropy`
+   returned `NaN` for the whole batch.
+2. **Illegal ground-truth target.** A note that *is* playable somewhere, but whose
+   *annotated* string implies fret 25+, put `-inf` at the cross-entropy target index:
+   loss `+inf`, gradients `inf`, parameters `NaN` one step later.
+3. **`0 * NaN` is `NaN`.** The playability term computed `softmax` over the same
+   `-inf` rows, producing `NaN` probabilities, then multiplied them by a zero mask —
+   which does not clear a `NaN`. Masking looked like a guard and was not one.
+
+The 72 % accuracy was not evidence of a working model, it was the *signature of a
+dead one*: once every parameter is `NaN`, `masked.argmax(-1)` over `[NaN, -inf, …]`
+returns the first legal string, and "always pick the highest string that can reach
+this pitch" happens to be right for the large fraction of notes that only one or two
+strings can play at all. Nothing in the loop checked `torch.isfinite`, and
+`clip_grad_norm_` actively made it worse — a `NaN` total norm scales *every* gradient
+by `NaN`.
+
+Contributing to the same class of problem: `gp_parser.py` read the true GP fret
+(`note.value`, which can exceed 24) while writing a hard-coded `metadata["frets"] =
+24`; nine other modules each carried their own literal `24`.
+
+### 11.2 Measured, not assumed
+
+Read-only audit of 986 processed track JSONs (320 Guitar Pro source files,
+672,049 notes), plus a parse-only sweep of a different 600-file sample
+(1,859,072 notes). Both agree:
+
+| finding | 986-track audit | 600-file sweep |
+|---|---|---|
+| notes | 672,049 | 1,859,072 |
+| `fret > 24` / illegal target string | 508 (0.0756 %) | 117 (0.0063 %) |
+| no legal string at all | 221 (0.0329 %) | 98 (0.0053 %) |
+| **pitch-equation failures** | **0** | **0** |
+| **bad tuning / capo / string index** | **0** | **0** |
+| **non-finite or missing numeric fields** | **0** | **0** |
+| files that failed to load | 0 | 0 |
+
+Over-max frets observed: 25–30. Unplayable pitches observed: MIDI 89–94.
+
+Two conclusions follow, and they are the ones that matter operationally:
+
+- **The parser is correct and the corpus does not need regenerating.** Every stored
+  field is internally consistent; `pitch == tuning[string] + fret + capo` holds for
+  100 % of notes. The only problem is notes this product cannot *represent*, which is
+  an exclusion question, not a re-extraction question.
+- **The failure rate was more than enough to be fatal.** At `batch 32 × seq_len 128`
+  = 4,096 notes per batch, 0.0756 % means ~3 offending notes *per batch* — roughly
+  95 % of batches poisoned. Even the sparser sample's 0.0063 % poisons ~23 % of
+  batches, i.e. a `NaN` within the first handful of steps. "NaN from the beginning"
+  is exactly what the data predicts.
+
+### 11.3 The contract: `src/fretboard.py`
+
+One dependency-free module owns the decision — **midi2Frets supports a fixed 24-fret,
+6-string guitar** — and parser, schema, dataset, trainer, evaluator, inference,
+multi-guitar candidate generation and the validator all import it. `resolve_max_fret`
+lets a per-track `fret_count` *tighten* the fretboard and never widen it.
+
+Fixed rather than variable, deliberately: fret is never predicted (it is always
+`pitch - tuning[string] - capo`), so fret count changes no tensor shape — only which
+`(pitch, string)` pairs are legal. That makes it a data-contract question, and the
+corpus records a constant 24 for every track anyway, so a "variable" contract would be
+variable in name only.
+
+The rule that fixes the bug: **a note whose annotated string implies a fret outside
+`[0, MAX_FRET]` is not a valid string-supervision example.**
+`dataset.string_supervision_targets` gives it `y_string = -100`. It is not relabelled
+onto a reachable string (fabricated ground truth), not deleted from the sequence (it
+is real music, valid model input, and still supervises the technique heads), and not
+left labelled (that is the `+inf`).
+
+### 11.4 A numerically closed loss
+
+`constraints.string_supervision_masks` is now the single shared answer to "which notes
+may supervise the string head, and which rows are safe to softmax" — used by the loss,
+the validation metrics and the tests, so the three cannot drift apart. It returns
+`has_any_legal`, `target_legal`, `usable`, and `softmax_safe_mask`.
+
+In `compute_loss`:
+
+- illegal candidates get `constraints.MASK_FLOOR` (`-1e4`), a **finite** floor that
+  underflows to probability 0 exactly like `-inf` but cannot produce `NaN`;
+- a row with **no** legal candidate is left entirely unmasked — it is excluded from
+  every loss anyway, so no softmax in the function ever sees a fully-masked row;
+- cross-entropy runs only over `usable` notes;
+- playability runs only over adjacent pairs where *both* notes are real and playable
+  (a purely physical criterion — no label needed);
+- a batch with zero usable notes, or zero valid pairs, returns a **differentiable
+  finite zero** rather than `0/0`.
+
+On clean data it reproduces the original objective to floating-point tolerance
+(`test_valid_examples_give_the_same_ce_as_the_original_masking`), so the fix moved
+nothing for good notes.
+
+Same rule applied at inference: `inference._compute_log_probs` now uses
+`constraints.safe_log_softmax`. Plain `log_softmax` on an unplayable note produced
+`NaN`, which then *defeated* the decoder's own `math.isinf` candidate filters —
+`NaN` is not `inf`, so a `NaN` score silently won the argmax.
+
+### 11.5 Fail fast
+
+`check_finite_loss` runs **before** `backward()`; `check_finite_grads` runs **before**
+`clip_grad_norm_` (clipping cannot rescue a `NaN` gradient, it propagates it) and
+before `optimizer.step()`. On a non-finite value the run stops immediately and prints
+which component failed, every source song/track in the batch, and the
+pitch/string/fret/capo/tuning of the implicated notes. `--bad-batch-dir DIR`
+serializes the offending batch for offline reproduction.
+
+Batch provenance required a small plumbing change: `encode_chunk` now carries a
+`song_id`, `collate_fn` keeps non-tensor entries as a per-example list, and batches are
+moved with `train.to_device` rather than a blanket `.to(device)` comprehension.
+`StreamingGuitarDataset._chunks` yields `(path, chunk)` so identity survives the
+shuffle buffer.
+
+The epoch log reports the contract's own accounting. Because the dataset filter runs
+upstream, an excluded note reaches the loss looking merely *unlabelled* — so
+`notes_unlabeled` (a real, non-padding note with no label, which nothing but that
+filter produces) is what keeps corpus-level exclusion visible from inside training,
+while `notes_illegal_target` / `notes_no_legal_string` measure what the upstream
+filter *missed*. Both are expected to read 0 on a correctly encoded batch: defence in
+depth, deliberately redundant.
+
+### 11.6 Imbalance-aware technique metrics
+
+The same run reported transition accuracy 0 % against a ~99 % majority baseline, and
+~99 % on effects/harmonic/bend-type. Accuracy cannot distinguish a working head from a
+constant predictor on vocabularies where >99 % of notes are `NONE`, so
+`metrics.classification_report` / `multilabel_report` / `regression_report` now add
+per-class precision/recall/F1 **with support**, macro-F1, the majority-class (or
+all-negative) baseline, and the accuracy-minus-baseline delta. A class absent from a
+split reports `None` and is excluded from the macro average rather than counted as a
+`0.0`; an empty split reports `N/A` rather than `NaN`; bend magnitude with zero valid
+examples reports `N/A`, never `0/0`.
+
+This immediately paid for itself on the single-song overfit: 100 % accuracy on the
+effects head alongside macro-F1 46.67 % and an all-negative baseline of 92.46 % — the
+head is largely reproducing "no effect", which the old single accuracy number hid
+completely.
+
+### 11.7 Not regenerating the corpus
+
+`src/validate_dataset.py` is a read-only auditor over already-processed JSON that
+discards nothing and records (never silently skips) files it cannot load. Its issue
+taxonomy is designed around the one decision that matters:
+
+- `pitch_equation_failed`, `bad_tuning`, `bad_capo`, `string_out_of_range`,
+  `negative_fret`, `non_finite_field`, `missing_field` → **the parser or the stored
+  file is wrong; regenerate.** Measured count across 2.5 M notes: **zero**.
+- `fret_over_max`, `no_legal_string`, `illegal_target_string`, `wrong_string_count`
+  → expected corpus variety; handled by exclusion, no regeneration.
+
+`--write-usable-index` therefore emits a cleaned training **view** over the existing
+JSON, and `train.py --usable-index <file>` consumes it — no Guitar Pro file is
+reparsed. (Per-*note* exclusion happens at encode time regardless; the index only
+drops whole tracks too damaged or too thin to stream.)
+
+A real bug the audit itself surfaced: the report names source files, the corpus is
+full of non-ASCII song titles, and a Windows console is cp1252 — printing the report
+raised `UnicodeEncodeError` and destroyed the entire audit *after* all the work was
+done. Fixed with the same console-safe encoding defence `preprocess_gp.py` and
+`train.py`'s `Logger` already use; `--json-out` keeps full UTF-8.
+
+### 11.8 An unrelated augmentation bug found on the way
+
+`dataset.transpose_notes` called
+`valid_string_mask(...)[0, 0]` on a `(1, 6)` mask, reading **string 0 alone**. Every
+transposition of a note the high E string could not reach — most of the fretboard —
+was rejected as "unplayable", so transposition augmentation was silently near-inert
+for low notes. Corrected to `[0]`. It never produced a wrong label (the check was too
+strict, not too loose), which is why it survived unnoticed.
+
+### 11.9 Verification
+
+- **430 tests pass** (385 pre-existing, every one unmodified, + 45 new across
+  `tests/test_train_loss_numerics.py` (21) and `tests/test_dataset_validator.py` (24)).
+- The new numeric suite covers all ten enumerated cases — normal note, padding, no
+  legal string, illegal target, fret 24, fret 25+, capo, alternate tuning, mixed
+  batch, playability with invalid neighbours — and every case asserts the total loss,
+  every component, *and the gradients* are finite.
+- **Before/after on one real corpus batch** (`70_LIVE…__t5.json`, 508 note-slots,
+  32 with no legal string), identical logits, identical notes — the pre-fix
+  `compute_loss` body run verbatim beside the new one:
+
+  | | before (HEAD) | after |
+  |---|---|---|
+  | `loss` | `nan` | 1.6494 |
+  | `ce` | `nan` | 1.2951 |
+  | `playability` | `nan` | 3.5433 |
+  | gradients finite | **False** | **True** |
+
+- **Single-song overfit**: 99.18 % accuracy, converged and auto-stopped at epoch 24,
+  every component finite.
+- **Streaming run, 12 epochs over a deliberately offender-dense 40-track corpus**
+  (3,542 notes, **5.93 %** unrepresentable — ~78× the corpus-wide rate, chosen
+  precisely because it hammers the failure path): val loss fell monotonically
+  1.9946 → 0.3352, string accuracy 100 %, **823 float metrics logged across every
+  record, 0 non-finite**, and `--bad-batch-dir` produced no dump because nothing
+  ever went non-finite. Per-epoch contract line, e.g.:
+  `3,440/3,708 real notes supervised the string head (7.23 % excluded: 268 filtered
+  by the dataset, 0 illegal target string and 68 unplayable that reached the loss)`.
+- A larger streaming run (986 tracks / 8,847 chunks) was started and confirmed finite
+  and decreasing through step 60 of 277 (loss 2.5250 → 1.2891 → 1.0937) before being
+  stopped for machine-resource reasons in favour of the denser 40-track run above.
+  It is **not** claimed here as a completed epoch.
+
+### 11.10 Honest limitations after this pass
+
+- The multi-guitar training path was already `NaN`-guarded by the earlier hardening
+  pass (`safe_log_softmax` plus an explicit finite floor in
+  `build_slot_track_cost_matrix`) and is **unchanged** here. It was not re-audited.
+- `MAX_FRET = 24` is now enforced, but the *real* per-track fret count is still not
+  recovered from Guitar Pro source files — `metadata["frets"]` remains a constant.
+  Recovering it would let `resolve_max_fret` tighten correctly per instrument; the
+  plumbing for that already exists and is unused.
+- The excluded notes are excluded, not solved. A guitar with more than 24 frets, or an
+  extended-range instrument, remains out of scope by product decision, and those
+  ~0.03–0.08 % of corpus notes contribute no string supervision.
+- The technique metrics are new *reporting*; no technique head was retrained or
+  rebalanced. Whether transition accuracy recovers now that the model is no longer
+  `NaN` is an empirical question for the next real run, not something this pass
+  established.
+- **No full-corpus training was run** (and none was attempted — see the standing
+  "training happens on rented cloud, not in-session" constraint). Every run above is a
+  minutes-long sanity check on ≤986 tracks, on CPU. "Loss is finite and decreasing"
+  is established; "the model is good" is not, and is not claimed.
+- The audited corpus was regenerated into scratch from 320 local Guitar Pro files
+  purely to have processed JSON to audit — `data/processed/gp_json/` is empty in this
+  checkout, so the *actual* corpus behind the reported NaN run was never inspected
+  directly. Re-run `validate_dataset.py` there before trusting the exact percentages;
+  the *conclusions* (parser correct, no regeneration needed) should hold, since two
+  independent samples totalling 2.5 M notes agree on zero structural errors.
