@@ -756,13 +756,19 @@ def classification_report(
         # rather than silently counted as a 0.0 that drags macro-F1 down.
         if support[c] == 0 and (tp[c] + fp[c]) == 0:
             per_class.append({"class": c, "name": name, "support": 0,
-                               "precision": None, "recall": None, "f1": None})
+                               "precision": None, "recall": None, "f1": None,
+                               "predicted_positive_rate": 0.0, "positive_rate": 0.0})
             continue
         prec = tp[c] / (tp[c] + fp[c]) if (tp[c] + fp[c]) else 0.0
         rec = tp[c] / (tp[c] + fn[c]) if (tp[c] + fn[c]) else 0.0
         f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) else 0.0
         per_class.append({"class": c, "name": name, "support": support[c],
-                           "precision": prec, "recall": rec, "f1": f1})
+                           "precision": prec, "recall": rec, "f1": f1,
+                           # How often the model PREDICTS this class at all.
+                           # A collapsed head reads ~0 here for every rare
+                           # class while its accuracy still reads ~99 %.
+                           "predicted_positive_rate": (tp[c] + fp[c]) / total,
+                           "positive_rate": support[c] / total})
         f1s.append(f1); precs.append(prec); recs.append(rec)
 
     majority_class = max(range(num_classes), key=lambda c: support[c])
@@ -818,7 +824,9 @@ def multilabel_report(
         else:
             f1 = 2 * prec * rec / (prec + rec)
         per_label.append({"label": k, "name": name, "support": pos[k],
-                           "precision": prec, "recall": rec, "f1": f1})
+                           "precision": prec, "recall": rec, "f1": f1,
+                           "predicted_positive_rate": (tp[k] + fp[k]) / n,
+                           "positive_rate": pos[k] / n})
         if f1 is not None:
             f1s.append(f1)
     return {
@@ -845,4 +853,138 @@ def regression_report(abs_errors: list[float]) -> dict[str, Any]:
         "mae": sum(abs_errors) / n,
         "rmse": (sum(e * e for e in abs_errors) / n) ** 0.5,
         "max_abs_error": max(abs_errors),
+    }
+
+# =========================================================================== #
+# Positive-class reporting and validation threshold tuning
+#
+# For a vocabulary that is >99 % "absence", overall macro-F1 is still
+# misleading: the absence class scores ~1.0 and drags the average up no matter
+# how badly every real technique does. POSITIVE-class macro-F1 -- the average
+# over the classes that are not "absence" -- is the number that actually moves
+# when majority-class collapse is fixed, and it is the criterion this work is
+# judged on.
+#
+# `predicted_positive_rate` is the companion diagnostic: a collapsed head has a
+# predicted-positive rate of ~0 regardless of what its accuracy says, and a
+# head that has over-corrected into predicting everything has one near 1. Recall
+# alone cannot distinguish "learned the class" from "predicts it everywhere".
+# =========================================================================== #
+
+def positive_macro_f1(report: dict[str, Any], negative_names: "set[str] | None" = None) -> float | None:
+    """Macro-F1 over the classes that are NOT the absence class.
+
+    Classes absent from the split (support 0 and never predicted) are excluded
+    rather than counted as 0.0 -- see classification_report. Returns None when
+    no positive class has any support, which is genuinely "no measurement",
+    not "a score of zero".
+    """
+    negative_names = negative_names or set()
+    f1s = [c["f1"] for c in report.get("per_class", [])
+           if c["name"] not in negative_names and c["f1"] is not None and c["support"] > 0]
+    return sum(f1s) / len(f1s) if f1s else None
+
+
+def positive_support(report: dict[str, Any], negative_names: "set[str] | None" = None) -> int:
+    negative_names = negative_names or set()
+    return sum(c["support"] for c in report.get("per_class", [])
+               if c["name"] not in negative_names)
+
+
+def binary_report(
+    scores: list[float], targets: list[int], threshold: float = 0.5,
+) -> dict[str, Any]:
+    """Precision/recall/F1 + predicted-positive rate for ONE binary head."""
+    tp = fp = fn = tn = 0
+    for s, t in zip(scores, targets):
+        pred = 1 if s >= threshold else 0
+        if t == 1 and pred == 1:
+            tp += 1
+        elif t == 0 and pred == 1:
+            fp += 1
+        elif t == 1 and pred == 0:
+            fn += 1
+        else:
+            tn += 1
+    n = tp + fp + fn + tn
+    if n == 0:
+        return {"support": 0, "positives": 0, "threshold": threshold, "precision": None,
+                "recall": None, "f1": None, "predicted_positive_rate": None,
+                "positive_rate": None, "accuracy": None}
+    prec = tp / (tp + fp) if (tp + fp) else 0.0
+    rec = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) else 0.0
+    return {
+        "support": n, "positives": tp + fn, "threshold": threshold,
+        "precision": prec, "recall": rec, "f1": f1,
+        "predicted_positive_rate": (tp + fp) / n,
+        "positive_rate": (tp + fn) / n,
+        "accuracy": (tp + tn) / n,
+    }
+
+
+DEFAULT_THRESHOLD_GRID = [round(0.02 * i, 2) for i in range(1, 50)]  # 0.02 .. 0.98
+
+
+def tune_binary_threshold(
+    scores: list[float], targets: list[int], grid: "list[float] | None" = None,
+    min_positives: int = 10, default: float = 0.5,
+) -> tuple[float, dict[str, Any]]:
+    """Pick the decision threshold that maximises F1 on THIS data.
+
+    Intended to be called on VALIDATION scores only. A threshold is the one
+    statistic it is legitimate to fit on validation -- it is a post-hoc
+    decision rule, not a parameter the loss can exploit -- but it must never be
+    fed back into training statistics (see technique_stats.py), and a threshold
+    tuned on validation and then reported on that same validation split is
+    optimistically biased. Report it as tuned, and re-measure on a held-out
+    split before believing the number.
+
+    Falls back to `default` when the split has too few positives to tune on:
+    a threshold fitted to 3 positive examples is noise wearing a number.
+    """
+    n_pos = sum(1 for t in targets if t == 1)
+    if n_pos < min_positives:
+        return default, binary_report(scores, targets, default)
+    best_t, best = default, binary_report(scores, targets, default)
+    for t in (grid or DEFAULT_THRESHOLD_GRID):
+        rep = binary_report(scores, targets, t)
+        if rep["f1"] is not None and best["f1"] is not None and rep["f1"] > best["f1"]:
+            best_t, best = t, rep
+    return best_t, best
+
+
+def tune_multilabel_thresholds(
+    scores: list[list[float]], targets: list[list[int]],
+    label_names: "list[str] | None" = None, grid: "list[float] | None" = None,
+    min_positives: int = 10, default: float = 0.5,
+) -> dict[str, Any]:
+    """Per-flag F1-optimal thresholds for the multi-label effects head.
+
+    One global 0.5 threshold is the wrong decision rule for a head whose flags
+    range from 8 % to 0.01 % positive: after class-balanced training the
+    calibrated operating point differs per flag by orders of magnitude, and a
+    shared threshold silently reports either zero recall or zero precision for
+    most of them.
+    """
+    if not targets:
+        return {"thresholds": [], "per_label": [], "macro_f1": None, "support": 0}
+    n_labels = len(targets[0])
+    thresholds, per_label, f1s = [], [], []
+    for k in range(n_labels):
+        col_scores = [row[k] for row in scores]
+        col_targets = [int(row[k]) for row in targets]
+        t, rep = tune_binary_threshold(col_scores, col_targets, grid, min_positives, default)
+        rep["name"] = label_names[k] if label_names and k < len(label_names) else str(k)
+        rep["label"] = k
+        rep["tuned"] = rep["positives"] >= min_positives
+        thresholds.append(t)
+        per_label.append(rep)
+        if rep["positives"] > 0 and rep["f1"] is not None:
+            f1s.append(rep["f1"])
+    return {
+        "thresholds": thresholds, "per_label": per_label,
+        "macro_f1": sum(f1s) / len(f1s) if f1s else None,
+        "support": len(targets),
+        "labels_with_support": len(f1s),
     }

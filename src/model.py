@@ -16,6 +16,9 @@ from schema import (
 )
 from dataset import FEATURE_SPEC_VERSION, NUM_MG_TRACK_BUCKETS, MAX_GUITAR_SLOTS, MAX_REQUESTED_K
 from fretboard import MAX_FRET, DEFAULT_FRET_COUNT
+from technique_taxonomy import (
+    NUM_TRANSITION_SUBTYPES, NUM_HARMONIC_SUBTYPES, NUM_BEND_SUBTYPES,
+)
 
 # Head groups a checkpoint may or may not have real trained weights for.
 # "string" is always considered trained (the original, always-supervised
@@ -26,6 +29,12 @@ HEAD_GROUPS = [
     "string", "chord", "transition", "effects", "harmonic", "bend",
     "voice", "bend_curve", "beat", "transition_source",
     "candidate_scorer",
+    # Hierarchical presence/subtype heads (technique_taxonomy.py). Separate
+    # groups from their flat counterparts on purpose: a checkpoint trained
+    # before this pass has real "transition" weights and NO
+    # "transition_hier" weights, and inference must be able to tell those
+    # apart rather than assume a head exists because its task does.
+    "transition_hier", "harmonic_hier", "bend_hier",
 ]
 
 # Bumped whenever the module SET or their SHAPES change in a way old
@@ -237,6 +246,35 @@ class GuitarStringTransformer(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(dim_feedforward // 2, NUM_TRANSITIONS),
         )
+
+        # ---- hierarchical presence -> subtype heads (technique_taxonomy) --- #
+        # The flat heads above stay exactly as they were (old checkpoints keep
+        # loading, inference keeps working); these are ADDITIONAL outputs that
+        # split each rare-technique decision into a well-balanced binary
+        # question and a multi-class question restricted to positives. See
+        # technique_taxonomy.py for why that is a different optimisation
+        # problem rather than a reweighting of the same one.
+        #
+        # Subtype head widths are `len(subtypes) + 1` -- the trailing OTHER
+        # slot exists whether or not the active rare-class policy merges
+        # anything into it, so changing policy never changes a tensor shape and
+        # never invalidates a checkpoint.
+        self.transition_presence_head = nn.Sequential(
+            nn.Linear(d_model * 3 + 2, dim_feedforward // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward // 2, 1),
+        )
+        self.transition_subtype_head = nn.Sequential(
+            nn.Linear(d_model * 3 + 2, dim_feedforward // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward // 2, NUM_TRANSITION_SUBTYPES),
+        )
+        self.harmonic_presence_head = nn.Linear(d_model, 1)
+        self.harmonic_subtype_head = nn.Linear(d_model, NUM_HARMONIC_SUBTYPES)
+        self.bend_presence_head = nn.Linear(d_model, 1)
+        self.bend_subtype_head = nn.Linear(d_model, NUM_BEND_SUBTYPES)
 
         # Voice head: which of Guitar Pro's 2 voices this note belongs to.
         # Per-note, unconditional, same pattern as effect/harmonic/bend heads.
@@ -572,6 +610,13 @@ class GuitarStringTransformer(nn.Module):
             pair = torch.cat([x, src_h, x - src_h, pitch_interval, timing_gap], dim=-1)
             technique_logits = {
                 "transition": self.transition_head(pair),          # (B, T, NUM_TRANSITIONS)
+                # Hierarchical view of the same three decisions (additive).
+                "transition_presence": self.transition_presence_head(pair).squeeze(-1),  # (B,T) logit
+                "transition_subtype": self.transition_subtype_head(pair),                # (B,T,Ns)
+                "harmonic_presence": self.harmonic_presence_head(x).squeeze(-1),         # (B,T) logit
+                "harmonic_subtype": self.harmonic_subtype_head(x),                       # (B,T,Nh)
+                "bend_presence": self.bend_presence_head(x).squeeze(-1),                 # (B,T) logit
+                "bend_subtype": self.bend_subtype_head(x),                               # (B,T,Nb)
                 "effects": self.effect_head(x),                    # (B, T, NUM_NOTE_EFFECTS) multi-label
                 "harmonic": self.harmonic_head(x),                 # (B, T, NUM_HARMONICS)
                 "bend_type": self.bend_type_head(x),                # (B, T, NUM_BEND_TYPES)
@@ -714,6 +759,9 @@ _MODULE_PREFIX_TO_HEAD = {
     "string_head": "string",
     "chord_root_head": "chord", "chord_quality_head": "chord",
     "transition_head": "transition",
+    "transition_presence_head": "transition_hier", "transition_subtype_head": "transition_hier",
+    "harmonic_presence_head": "harmonic_hier", "harmonic_subtype_head": "harmonic_hier",
+    "bend_presence_head": "bend_hier", "bend_subtype_head": "bend_hier",
     "effect_head": "effects",
     "harmonic_head": "harmonic",
     "bend_type_head": "bend", "bend_magnitude_head": "bend",

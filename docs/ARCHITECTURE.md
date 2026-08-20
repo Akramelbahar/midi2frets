@@ -973,3 +973,286 @@ strict, not too loose), which is why it survived unnoticed.
   directly. Re-run `validate_dataset.py` there before trusting the exact percentages;
   the *conclusions* (parser correct, no regeneration needed) should hold, since two
   independent samples totalling 2.5 M notes agree on zero structural errors.
+
+
+## 12. Rare-technique objectives: fixing majority-class collapse
+
+The technique heads reported ~99 % accuracy and ~0 % recall on every class that
+mattered. This section records why that was a property of the objective rather
+than of the optimiser, what replaced it, and what the measured effect was.
+
+### 12.1 The diagnosis
+
+`schema.py`'s technique vocabularies are flat multi-class lists whose leading
+entry is the *absence* of the technique (`HARMONICS[0] == "NONE"`,
+`BEND_TYPES[0] == "NONE"`, `TRANSITIONS[0:2] == ["NONE", "PICKED"]`). Measured
+on the TRAIN split of a 1,032-track corpus (844 tracks, 635,689 examined notes):
+
+| head | positive rate | rarest classes present |
+|---|---|---|
+| transition | 2.166 % | `SLIDE_IN_FROM_ABOVE` 16, `SLIDE_OUT_UP` 34, `SLIDE_OUT_DOWN` 73 |
+| harmonic | **0.065 %** (413 notes total) | `SEMI` 2, `TAPPED` 6 |
+| bend | 0.396 % | `BEND_RELEASE_BEND` 13, `PREBEND` 59 |
+| effects (per flag) | 3.72 % … **0.0019 %** | `TRILL` 12, `TREMOLO_PICKING` 95 |
+
+Against that distribution a flat cross-entropy has essentially one term.
+"Predict the absence class everywhere" already minimises it, so the model does
+exactly that, and no learning-rate change alters it because there is no
+gradient pointing anywhere else. The reported symptoms — transition accuracy
+0 % against a 99 % majority baseline, effects/harmonic/bend all ~99 % — are two
+views of the same collapse.
+
+The old metrics could not distinguish this from success. A measured baseline
+run (§12.7) reads **99.47 % transition accuracy with 16.6 % positive-class
+macro-F1**, and an effects head at **99.56 % micro-accuracy with 0.00 %
+macro-F1** — the head never predicts any flag positive at all, so precision is
+undefined (`N/A`) rather than merely low, for flags with over a thousand
+validation positives.
+
+### 12.2 Hierarchical presence → subtype (`src/technique_taxonomy.py`)
+
+Each of the three collapsing heads is split in two:
+
+```
+presence : binary,      over every EXAMINED note
+subtype  : multi-class, over POSITIVE notes ONLY
+```
+
+This changes the optimisation problem instead of reweighting it. The presence
+head faces a binary imbalance, where a capped `pos_weight` is well understood.
+The subtype head never sees the absence class at all — **collapse to "absence"
+is not expressible in its label space**, because that label is not in it.
+
+That "positives only" property is enforced in the LABELS, not in the loss:
+`dataset._technique_tensors` emits `y_*_subtype = -100` for every negative and
+every unlabeled note, so no loss term has to remember to mask it, and no future
+caller can accidentally reintroduce the absence class.
+
+Subtype head widths are `len(subtypes) + 1`, the extra slot being `OTHER`. It
+exists whether or not the active policy merges anything into it, so changing
+policy never changes a tensor shape or invalidates a checkpoint.
+
+### 12.3 Rare-class policy, not enormous weights
+
+An ultra-rare class left in the label space with an inverse-frequency weight
+does not learn. `TRILL` has 12 training examples in 635,689; its uncapped
+weight would be ~53,000. That produces a gradient spike whenever one of those
+12 notes appears, destabilises every class sharing the head, and generalises to
+nothing — while contributing pure noise to macro-F1.
+
+`RareClassPolicy` therefore offers three explicit options, decided from
+TRAIN-split counts and logged:
+
+* `keep` — everything stays, weights capped.
+* `ignore` — under-supported classes become `-100`: they train nothing and are
+  excluded from macro-F1 rather than dragging it down with a structural zero.
+* `merge_other` (default) — folded into `OTHER`, so "some rare technique is
+  happening here" stays learnable when "exactly which one" is not.
+
+Effect flags under `--effect-min-support` are masked out of the BCE entirely,
+for the same reason.
+
+### 12.4 Train-only statistics (`src/technique_stats.py`)
+
+Every weight, cap, label-space decision and sampler target derives from
+counts aggregated over `train_entries` **only**. `TechniqueStats` records its
+split and `require_train()` raises `NotTrainStatsError` if anything tries to use
+validation counts for training — deriving a class weight or a label space from
+validation leaks its distribution into the model, quietly, and inflates exactly
+the macro-F1 numbers this work is judged on.
+
+The counts come free: `streaming_dataset.build_chunk_index` already parses every
+song once, so each entry now carries its own label counts (`INDEX_VERSION 2`),
+and aggregation happens *after* the song-level split. There is no point at which
+a validation song's counts exist in the same object as the training ones.
+
+The one statistic legitimately fitted on validation is the per-class decision
+threshold (§12.6) — a post-hoc decision rule, never fed back into a loss.
+
+### 12.5 Losses
+
+* **Presence**: capped class-balanced BCE (`--presence-weight-cap`, default 20;
+  the uncapped ratio for harmonic would be ~1,538).
+* **Subtype**: cross-entropy over positives only, with the softmax restricted to
+  (a) classes the policy kept and (b) for transitions, the classes that are
+  *physically possible* for that note. A hammer-on that does not ascend, a
+  pull-off that does not descend, a slide between identical frets and a tie
+  between different pitches are impossible, not unlikely; `inference.py` already
+  rejects them at decode time, so letting the head spend probability there is
+  pure waste. Masking uses `constraints.MASK_FLOOR`, never `-inf` — a row whose
+  target is `-100` is skipped by cross-entropy but still goes through
+  `log_softmax`, and an all-`-inf` row there returns `NaN` (§11).
+  The dataset forces the TRUE class legal before emitting the mask, so a masked
+  target — `+inf` loss — is impossible by construction, not merely unlikely.
+* **Effects**: capped class-balanced **and** asymmetric focal BCE
+  (`asymmetric_focal_bce`, ASL-style). The `pos_weight` attacks the class
+  imbalance; `gamma_neg` down-weights the easy negatives that supply almost all
+  of the loss on a 99.5 %-negative head. Built on `logsigmoid` and with the
+  focal factor detached, so it is finite at any logit magnitude; with both
+  gammas 0 it reduces *exactly* to `binary_cross_entropy_with_logits(...,
+  pos_weight=...)`, which is what makes the equivalence test meaningful.
+* **Bend magnitude / curve**: gated on bend-POSITIVE notes. Previously they were
+  gated on "examined", so >99 % of their examples were "predict an all-zero
+  curve" — both heads learned the constant zero function while the presence
+  question they were implicitly answering is the presence head's job.
+
+The string/fret head and `compute_loss` are **unchanged**; there is a regression
+test asserting the string CE still matches its reference value.
+
+### 12.6 Metrics that can see the failure
+
+* `predicted_positive_rate` per class — a collapsed head reads ~0 here whatever
+  its accuracy says, and an over-corrected head reads ~1. Recall alone cannot
+  tell "learned the class" from "predicts it everywhere".
+* `positive_macro_f1` — macro-F1 over the non-absence classes. Overall macro-F1
+  is still flattered by the absence class scoring ~1.0.
+* Per-class precision / recall / F1 / **support**, rarest class first.
+* `tune_multilabel_thresholds` — per-flag F1-optimal thresholds fitted on
+  VALIDATION. A single 0.5 is the wrong rule for flags spanning 3.7 % to
+  0.002 % positive: after class-balanced training their calibrated operating
+  points differ by orders of magnitude. Tuned on val and reported on val, so it
+  is an optimistic estimate — labelled `tuned` everywhere it appears, and
+  refused entirely when a flag has fewer than 10 positives, because a threshold
+  fitted to 3 examples is noise wearing a number.
+
+### 12.7 Technique-aware chunk sampler
+
+Rare techniques are a fraction of a percent of notes, so a uniformly-sampled
+batch contains one every few steps — too sparse to compete with the majority
+class no matter how the loss is weighted. `RareChunkMixer` raises their rate at
+the INPUT, which is the half of the fix loss weighting cannot do.
+
+* Every base chunk is still emitted exactly once; rare chunks are **injected**
+  from a bounded reservoir rather than replacing normal ones, so oversampling
+  never costs exposure to ordinary music. An epoch grows by roughly
+  `p / (1 - p)`.
+* The rate is controlled by a running count, so it hits its target without
+  needing to know the corpus's rare-chunk density in advance (measured: a 2 %
+  rare stream converges to 25.0 %).
+* **Song-level train/val separation is preserved by construction**: the mixer
+  only ever re-emits chunks it was handed, and it lives inside a
+  `StreamingGuitarDataset` built from ONE split's file list. The validation
+  dataset is never given rare labels at all, so val stays a clean estimate of
+  the real-world mix.
+* Re-emitted chunks are encoded *after* selection, so each repeat gets a fresh
+  augmentation draw rather than an identical tensor copy.
+
+The honest cost: sampling with replacement means a genuinely rare chunk is seen
+many times per epoch, so these classes are the ones most at risk of
+memorisation. That is a deliberate trade — 0 recall is not a better outcome
+than an over-fitted recall — and it is why the reservoir is bounded.
+
+### 12.8 What was deliberately NOT done
+
+* **Inference still reads the FLAT heads.** They remain trained at their
+  existing weights, so `inference.predict_techniques` and the GP5 export path
+  are untouched and a new checkpoint is not a regression for them. Routing
+  decoding through the hierarchy (using the presence head's tuned threshold,
+  then the subtype head) is a real follow-up, not something half-done here.
+  `trained_heads` distinguishes `transition` from `transition_hier` precisely so
+  that a future decoder can tell whether the hierarchical path exists.
+* **No head was retrained on the full corpus.** Everything below is a bounded
+  smoke comparison on CPU.
+* **`OTHER` is not decoded back to a specific technique.** A note the subtype
+  head calls `OTHER` is known to carry *some* rare technique; recovering which
+  one would need the ignored classes back in the label space.
+
+### 12.9 Measured A/B (1,032 tracks, matched optimizer steps)
+
+Corpus: 340 Guitar Pro files → 1,032 tracks → 955 train / 111 val tracks, split by
+`source_song_id` (seed 42). Both arms share corpus, split, model, lr, batch (32)
+and step budget; they differ only in the objectives. **Compared at optimizer step
+440** — not at each arm's own best, because oversampling lengthens an epoch and
+equal *epochs* would give arm B ~29 % more gradient updates.
+
+Arm A reproduces the pre-change behaviour by flag (`--transition-presence-weight 0
+… --rare-chunk-fraction 0 --effect-weight-cap 1.0 --focal-gamma-neg 0
+--no-physical-class-mask`). Arm A is *not* git HEAD: HEAD still has the §11 NaN
+bug, so its "baseline" would be a dead model.
+
+| | arm A (flat) | arm B (hierarchical) | Δ |
+|---|---|---|---|
+| **string accuracy** | 74.36 % | 73.55 % | **−0.81 pp** |
+| **nontrivial string accuracy** | 72.26 % | 71.38 % | **−0.88 pp** |
+| string CE | 0.5574 | 0.5688 | +0.0114 |
+| transition positive macro-F1 | 16.59 % | **17.89 %** | **+1.30 pp** |
+| effects macro-F1 @ shared 0.5 | **0.00 %** | **1.99 %** | +1.99 pp |
+| effects macro-F1 @ val-tuned thresholds | 3.02 % | **3.65 %** | +0.63 pp |
+| harmonic positive macro-F1 | 0.00 % | 0.00 % | — |
+| bend positive macro-F1 | 0.00 % | 0.00 % | — |
+
+Given one further epoch (step 660, arm B only) string accuracy returns to
+74.36 % — exactly arm A's step-440 value — while transition positive macro-F1
+holds at 17.43 % and effects reach 2.12 % / 3.80 %. So the string cost at equal
+steps is a *rate* effect, not a ceiling.
+
+**Verdict against the stated criterion: PARTIAL.**
+
+* Guardrail **held** — both string metrics moved less than 1 pp, and recover fully
+  with one more epoch. The string head and `compute_loss` are untouched; the cost
+  is shared-trunk capacity going to the new heads.
+* transition and effects **improved**. The effects head is the clearest result: it
+  went from *never predicting any flag positive at all* (macro-F1 exactly 0.00,
+  precision undefined for flags with >1,000 validation positives) to a non-zero
+  score. That is the collapse breaking.
+* harmonic and bend did **not** improve, and the reason is structural rather than
+  a tuning failure — see below.
+
+#### Why harmonic and bend did not move
+
+The criterion is measured on the **flat** heads, because those are what
+`inference.py` decodes (§12.8). The hierarchical heads *do* learn those tasks
+from a standing start:
+
+| treatment-only head | subtype macro-F1 (positives only) | support |
+|---|---|---|
+| transition subtype | 29.21 % | 1,260 |
+| bend subtype | 10.99 % | 343 |
+| harmonic subtype | 5.65 % | 677 |
+
+— but nothing routes those predictions into the flat output the criterion reads.
+The decision to keep the flat heads as the decoding path (taken so a new
+checkpoint would not ship a dead technique decoder) is therefore the binding
+constraint on this metric, and closing it means wiring decode through
+presence→subtype. That is now a demonstrated requirement, not a speculative
+follow-up.
+
+#### A leaked feature that invalidates one headline number
+
+The transition presence head reports **F1 98.35 %**. It has not earned it.
+
+`transition_has_source` is a model INPUT that `dataset._technique_tensors`
+derives from the transition label's own `source_note_id`. Every EDGE transition
+(hammer-on, pull-off, both slides, tie) has it set; every `PICKED` note does not.
+So "predict presence = has_source" is a free, near-perfect predictor sitting in
+the input. Measured on this validation split:
+
+```
+trivial predictor "presence = transition_has_source":
+   precision 100.00 %   recall 97.30 %   F1 98.63 %
+```
+
+**98.63 % > 98.35 %** — the head does not even match the leak, let alone beat it.
+Its recall gap is exactly the self-ornaments (`SLIDE_OUT_UP/DOWN`,
+`SLIDE_IN_FROM_*`, 20 of 741 val positives), which carry no source note.
+
+This is a pre-existing property of the pair-feature recipe, shared by the flat
+transition head, and not introduced here — but the hierarchy makes it trivially
+exploitable and would have let this pass be reported as a 98 % success. `evaluate`
+now reports the leaked-feature baseline beside the presence F1, with an explicit
+"DOES NOT BEAT IT" verdict, for the same reason the majority-class baseline is
+printed beside accuracy. Two regression tests pin the relationship.
+
+The real fix is to stop feeding a label-derived `transition_has_source` at
+training time — the transition-source POINTER head already predicts it at
+inference — and it is **not** done here.
+
+#### Honest limits of this measurement
+
+* 440 optimizer steps at batch 32 is ~14,000 chunks: a smoke comparison, not a
+  converged result. Nothing here establishes final quality.
+* Effects macro-F1 of 1.99 % is "no longer exactly zero", not "good".
+* Threshold tuning is fitted and reported on the same validation split, so those
+  numbers are optimistic by construction (labelled `tuned` throughout).
+* Both arms ran on CPU; several runs were killed by the environment mid-flight,
+  and the surviving pair are the two arms of the original comparison script.

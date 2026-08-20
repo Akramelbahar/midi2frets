@@ -12,6 +12,7 @@ import schema as S
 from parser import TPQ, STANDARD_TUNING, compute_features, load_song
 from constraints import compute_frets, valid_string_mask
 from fretboard import MAX_FRET, DEFAULT_FRET_COUNT, is_supervisable
+import technique_taxonomy as TT
 
 FEATURE_KEYS = [
     "pitch",
@@ -251,6 +252,41 @@ def _technique_tensors(notes: list[dict[str, Any]], pad_len: int) -> dict[str, t
             else:
                 y_transition_source_candidate.append(-100)
 
+    # ---- hierarchical presence/subtype targets (technique_taxonomy.py) ---- #
+    # Derived from the SAME flat labels above, never re-read from the notes, so
+    # the flat and hierarchical views of a note can never disagree. The subtype
+    # target is -100 on every negative and every unlabeled note, which is what
+    # makes "subtype loss only sees positive ground truth" a property of the
+    # DATA rather than something each loss term has to remember to enforce.
+    hier: dict[str, list] = {}
+    for head, flat in (("transition", y_transition), ("harmonic", y_harmonic), ("bend", y_bend_type)):
+        pres, sub, pmask = [], [], []
+        for f in flat:
+            p_, s_, m_ = TT.flat_to_presence_subtype(head, f)
+            pres.append(p_); sub.append(s_); pmask.append(m_)
+        hier[f"y_{head}_presence"] = pres
+        hier[f"y_{head}_subtype"] = sub
+        hier[f"y_{head}_presence_mask"] = pmask
+
+    # Physical legality of each TRANSITION subtype, from the true (source,
+    # dest) pair this chunk actually contains. A hammer-on that does not
+    # ascend is impossible, not merely unlikely; masking those classes out of
+    # the subtype softmax stops the head spending capacity on options the
+    # decoder rejects anyway. With no in-chunk source note nothing can be
+    # ruled out, so every class stays legal -- conservative by construction.
+    trans_legal = []
+    for i, n in enumerate(notes):
+        src = notes[i + src_offset[i]] if has_source[i] > 0 else None
+        legal = TT.transition_subtype_legality(src, n)
+        # The TRUE class is always kept legal. The parser only emits physically
+        # valid transitions, so this should never fire -- but a masked-out true
+        # class would put -inf at the cross-entropy target index, which is +inf
+        # loss, and no data assumption is worth that failure mode.
+        true_sub = hier["y_transition_subtype"][i]
+        if true_sub != TT.IGNORE_INDEX and 0 <= true_sub < len(legal):
+            legal[true_sub] = True
+        trans_legal.append([1.0 if x else 0.0 for x in legal])
+
     def pad_long(vals, fill):
         return torch.tensor(vals + [fill] * pad_len, dtype=torch.long)
 
@@ -258,6 +294,17 @@ def _technique_tensors(notes: list[dict[str, Any]], pad_len: int) -> dict[str, t
         return torch.tensor(vals + [fill] * pad_len, dtype=torch.float32)
 
     return {
+        "y_transition_presence": pad_float(hier["y_transition_presence"], 0.0),
+        "y_transition_presence_mask": pad_float(hier["y_transition_presence_mask"], 0.0),
+        "y_transition_subtype": pad_long(hier["y_transition_subtype"], -100),
+        "y_harmonic_presence": pad_float(hier["y_harmonic_presence"], 0.0),
+        "y_harmonic_presence_mask": pad_float(hier["y_harmonic_presence_mask"], 0.0),
+        "y_harmonic_subtype": pad_long(hier["y_harmonic_subtype"], -100),
+        "y_bend_presence": pad_float(hier["y_bend_presence"], 0.0),
+        "y_bend_presence_mask": pad_float(hier["y_bend_presence_mask"], 0.0),
+        "y_bend_subtype": pad_long(hier["y_bend_subtype"], -100),
+        "transition_subtype_legal": torch.tensor(
+            trans_legal + [[1.0] * TT.NUM_TRANSITION_SUBTYPES] * pad_len, dtype=torch.float32),
         "y_transition": pad_long(y_transition, -100),
         "y_harmonic": pad_long(y_harmonic, -100),
         "y_bend_type": pad_long(y_bend_type, -100),
@@ -276,6 +323,48 @@ def _technique_tensors(notes: list[dict[str, Any]], pad_len: int) -> dict[str, t
         "y_beat_effect": torch.tensor(y_beat_effect + [[0.0] * S.NUM_BEAT_EFFECT_FLAGS] * pad_len, dtype=torch.float32),
     }
 
+
+
+# --------------------------------------------------------------------------- #
+# Technique-aware chunk selection
+# --------------------------------------------------------------------------- #
+def chunk_rare_labels(chunk: list[dict[str, Any]], rare: dict[str, set[str]]) -> set[str]:
+    """Which of the configured RARE technique labels this chunk contains.
+
+    Operates on raw note dicts (pre-encoding), so the sampler can decide
+    whether to oversample a chunk without paying for tensor construction on
+    chunks it is only going to look at.
+
+    Only labels the corpus actually EXAMINED count -- a note whose
+    `label_masks` never looked at bends is not evidence of a bend's absence or
+    presence, and oversampling on unexamined notes would bias the input
+    distribution toward badly-labelled songs.
+    """
+    found: set[str] = set()
+    for n in chunk:
+        masks = n.get("label_masks") or {}
+        if rare.get("transition") and masks.get("transition"):
+            it = n.get("incoming_transition")
+            if it and it.get("type") in rare["transition"]:
+                found.add(f"transition:{it['type']}")
+        if rare.get("harmonic") and masks.get("harmonic"):
+            harm = n.get("harmonic")
+            if harm and harm.get("type") in rare["harmonic"]:
+                found.add(f"harmonic:{harm['type']}")
+        if rare.get("bend") and masks.get("bend"):
+            bend = n.get("bend")
+            if bend and bend.get("type") in rare["bend"]:
+                found.add(f"bend:{bend['type']}")
+        if rare.get("effects") and masks.get("effects"):
+            effects = n.get("effects") or {}
+            for name in rare["effects"]:
+                if effects.get(name.lower()):
+                    found.add(f"effects:{name}")
+    return found
+
+
+def chunk_is_rare_positive(chunk: list[dict[str, Any]], rare: dict[str, set[str]]) -> bool:
+    return bool(chunk_rare_labels(chunk, rare))
 
 def string_supervision_targets(
     notes: list[dict[str, Any]], tuning_default: list[int], capo_default: int,

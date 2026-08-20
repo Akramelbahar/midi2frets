@@ -673,6 +673,79 @@ drops whole tracks too damaged or too thin to be worth streaming.
   keep the GPU quota for training; copy datasets to the VM's local disk first,
   Drive-mounted I/O is the bottleneck.
 
+### Rare-technique objectives (anti-collapse)
+
+The technique heads classify vocabularies that are >99 % *absence* — measured on
+a real 844-track training split, `harmonic` is **0.065 %** positive and the
+`TRILL` effect flag appears **12 times in 635,689 notes**. A flat cross-entropy
+over that distribution is minimised by predicting the absence class everywhere,
+so the model does, and reports ~99 % accuracy while achieving ~0 % recall on
+every class that matters. That is majority-class collapse, and it is a property
+of the objective, not of the learning rate.
+
+Three mechanisms replace it (see `docs/ARCHITECTURE.md` §12 for the full
+rationale). The **string/fret head and its loss are unchanged.**
+
+**1. Hierarchical presence → subtype.** Each collapsing head splits into a
+binary "is there a technique here" over all examined notes and a multi-class
+"which one" over **positive notes only**. The subtype head's label space does
+not contain the absence class, so collapsing onto it is not expressible. The
+positives-only property lives in the labels (`y_*_subtype = -100` on every
+negative), not in a mask each loss has to remember.
+
+**2. Class-balanced, capped, focal losses.** Presence heads use a capped
+`pos_weight`; the multi-label effects head uses capped class-balanced
+**asymmetric focal BCE**, whose `gamma_neg` down-weights the easy negatives that
+otherwise supply nearly all of the loss. Caps matter: `TRILL`'s uncapped
+inverse-frequency weight is ~53,000, which destabilises training rather than
+balancing it. Ultra-rare classes are `merge_other` / `ignore`d instead — never
+handed an enormous weight.
+
+**3. Technique-aware oversampling.** `RareChunkMixer` raises the share of train
+chunks containing a rare positive to a target (default 25 %) by *injecting*
+extra draws from a bounded reservoir — every ordinary chunk is still seen
+exactly once. Song-level train/val separation is preserved by construction: the
+mixer only re-emits chunks it was handed, and the validation dataset is never
+given rare labels, so val stays a clean estimate of the real mix.
+
+All class statistics come from the **TRAIN split only**
+(`src/technique_stats.py` raises `NotTrainStatsError` otherwise) and are
+aggregated from the chunk index *after* the song-level split. The one thing
+fitted on validation is per-flag decision thresholds — a post-hoc decision rule,
+never fed back into a loss, and refused when a flag has fewer than 10 positives.
+
+```bash
+# Defaults are the new objectives; every knob is explicit.
+python src/train.py --stream --stream-dirs data/processed/gp_json \
+    --rare-class-mode merge_other --rare-min-support 50 --effect-min-support 50 \
+    --rare-chunk-fraction 0.25 --focal-gamma-neg 2.0 \
+    --class-stats-out reports/train_class_stats.json
+
+# Reproduce the pre-change behaviour (for an A/B):
+python src/train.py --stream --stream-dirs data/processed/gp_json \
+    --transition-presence-weight 0 --transition-subtype-weight 0 \
+    --harmonic-presence-weight 0 --harmonic-subtype-weight 0 \
+    --bend-presence-weight 0 --bend-subtype-weight 0 \
+    --rare-chunk-fraction 0 --effect-weight-cap 1.0 --effect-min-support 0 \
+    --focal-gamma-neg 0 --no-physical-class-mask
+```
+
+Use `--max-steps-per-epoch` when comparing runs: oversampling lengthens an epoch
+by roughly `p / (1 - p)`, so equal *epochs* would silently give the oversampled
+run ~29 % more gradient steps.
+
+**Read the right number.** Accuracy and overall macro-F1 both stay high while a
+head is collapsed — the absence class alone carries them. The training log now
+prints, per head, **positive-class macro-F1**, per-class precision/recall/F1
+with support (rarest first), and the **predicted-positive rate**, which is what
+separates "learned the class" (rate ≈ true rate) from "never predicts it"
+(≈ 0) and "predicts it everywhere" (≈ 1).
+
+Inference still decodes from the flat heads; they remain trained, so existing
+checkpoints and the GP5 export path are unaffected. `trained_heads`
+distinguishes `transition` from `transition_hier` so a future decoder can tell
+whether the hierarchical path exists.
+
 ## 8. Inference & decoding
 
 ```bash

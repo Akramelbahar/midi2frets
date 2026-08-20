@@ -21,6 +21,7 @@ import json
 import math
 import sys
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -46,7 +47,10 @@ from fretboard import MAX_FRET
 from constraints import MASK_FLOOR, string_supervision_masks
 from metrics import (
     classification_report, multilabel_report, regression_report,
+    positive_macro_f1, binary_report, tune_binary_threshold, tune_multilabel_thresholds,
 )
+import technique_taxonomy as TT
+from technique_stats import TechniqueStats, rare_positive_labels
 
 
 # --------------------------------------------------------------------------- #
@@ -396,10 +400,318 @@ def compute_loss(
     return loss, stats
 
 # --------------------------------------------------------------------------- #
+# Hierarchical technique objectives (presence -> subtype)
+#
+# The problem these replace: a flat cross-entropy over a vocabulary that is
+# >99 % "absence" has essentially one term. Predicting the majority class
+# everywhere already minimises it, so the model does exactly that -- accuracy
+# reads ~99 %, per-class recall on every technique that matters reads 0, and no
+# amount of learning-rate tuning changes it, because there is no gradient
+# pointing anywhere else. That is majority-class collapse, and it is a property
+# of the OBJECTIVE, not of the optimiser.
+#
+# Splitting into presence (binary, over all examined notes) and subtype
+# (multi-class, over positives ONLY) changes the problem rather than reweighting
+# it. The presence head faces a binary imbalance, which a capped `pos_weight`
+# handles well. The subtype head never sees the absence class at all, so its
+# majority class is a real technique -- collapse to "absence" is not expressible
+# in its label space.
+#
+# Everything statistical here comes from TRAIN-split counts (technique_stats.py,
+# which refuses non-train statistics outright). Validation is used for exactly
+# one thing, per-class decision thresholds, and only at evaluation time.
+# --------------------------------------------------------------------------- #
+@dataclass
+class TechniqueLossConfig:
+    """Everything the rare-technique objectives need beyond the batch itself.
+
+    Built by `from_stats` from TRAIN counts + a `RareClassPolicy`; `neutral()`
+    gives the un-balanced, un-remapped configuration used by tests and by any
+    run without statistics (which then behaves like plain masked BCE/CE).
+    """
+    presence_pos_weight: dict[str, float] = field(default_factory=dict)
+    # head -> table[len(subtype_vocab)] mapping a subtype id to its TRAINED id
+    # (IGNORE_INDEX to drop the example entirely). Rare-class policy lives here.
+    subtype_remap: dict[str, list[int]] = field(default_factory=dict)
+    # head -> bool per subtype column: may the softmax put mass here at all?
+    subtype_trainable: dict[str, list[bool]] = field(default_factory=dict)
+    effect_pos_weight: list[float] = field(default_factory=list)
+    effect_active: list[bool] = field(default_factory=list)
+    # Asymmetric focal BCE (ASL-style). gamma_neg > 0 down-weights EASY
+    # negatives, which is where a 99.7 %-negative multi-label head spends
+    # almost all of its loss; gamma_pos is normally left at 0 so no positive is
+    # ever down-weighted. Both 0 reduces this exactly to weighted BCE.
+    focal_gamma_neg: float = 2.0
+    focal_gamma_pos: float = 0.0
+    use_physical_mask: bool = True
+    _cache: dict = field(default_factory=dict, repr=False, compare=False)
+
+    @classmethod
+    def neutral(cls) -> "TechniqueLossConfig":
+        return cls(
+            presence_pos_weight={h: 1.0 for h in TT.HIERARCHICAL_HEADS},
+            subtype_remap={h: list(range(TT.NUM_SUBTYPES[h])) for h in TT.HIERARCHICAL_HEADS},
+            subtype_trainable={h: [True] * TT.NUM_SUBTYPES[h] for h in TT.HIERARCHICAL_HEADS},
+            effect_pos_weight=[1.0] * S.NUM_NOTE_EFFECTS,
+            effect_active=[True] * S.NUM_NOTE_EFFECTS,
+            focal_gamma_neg=0.0, focal_gamma_pos=0.0,
+        )
+
+    @classmethod
+    def from_stats(
+        cls, stats: "TechniqueStats", policy: TT.RareClassPolicy,
+        presence_weight_cap: float = 20.0, effect_weight_cap: float = 50.0,
+        focal_gamma_neg: float = 2.0, focal_gamma_pos: float = 0.0,
+        use_physical_mask: bool = True,
+    ) -> "TechniqueLossConfig":
+        stats.require_train()   # loud, not a comment: no validation-derived weights
+        remaps = stats.build_remaps(policy)
+        subtype_remap, subtype_trainable = {}, {}
+        for head, remap in remaps.items():
+            n = TT.NUM_SUBTYPES[head]
+            table = [remap.apply(i) for i in range(n)]
+            subtype_remap[head] = table
+            trainable = [False] * n
+            for tgt in table:
+                if tgt != TT.IGNORE_INDEX:
+                    trainable[tgt] = True
+            # A head whose every class was ignored would mask its entire
+            # softmax; leave it fully open instead (the term contributes
+            # nothing anyway, since no example ever targets it).
+            if not any(trainable):
+                trainable = [True] * n
+            subtype_trainable[head] = trainable
+        return cls(
+            presence_pos_weight={h: stats.presence_pos_weight(h, presence_weight_cap)
+                                 for h in TT.HIERARCHICAL_HEADS},
+            subtype_remap=subtype_remap, subtype_trainable=subtype_trainable,
+            effect_pos_weight=stats.effect_pos_weights(effect_weight_cap),
+            effect_active=stats.effect_active_mask(policy.effect_min_support),
+            focal_gamma_neg=focal_gamma_neg, focal_gamma_pos=focal_gamma_pos,
+            use_physical_mask=use_physical_mask,
+        )
+
+    # ---- cached device tensors (rebuilt only when the device changes) ----- #
+    def _tensor(self, key: str, values, device, dtype=torch.float32) -> torch.Tensor:
+        cached = self._cache.get(key)
+        if cached is None or cached.device != device or cached.dtype != dtype:
+            cached = torch.tensor(values, dtype=dtype, device=device)
+            self._cache[key] = cached
+        return cached
+
+    def remap_table(self, head: str, device) -> torch.Tensor:
+        return self._tensor(f"remap:{head}", self.subtype_remap[head], device, torch.long)
+
+    def trainable_mask(self, head: str, device) -> torch.Tensor:
+        return self._tensor(f"trainable:{head}",
+                            [1.0 if b else 0.0 for b in self.subtype_trainable[head]], device)
+
+    def effect_weight_tensor(self, device) -> torch.Tensor:
+        return self._tensor("effect_w", self.effect_pos_weight, device)
+
+    def effect_active_tensor(self, device) -> torch.Tensor:
+        return self._tensor("effect_a", [1.0 if b else 0.0 for b in self.effect_active], device)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "presence_pos_weight": self.presence_pos_weight,
+            "subtype_remap": self.subtype_remap,
+            "subtype_trainable": self.subtype_trainable,
+            "effect_pos_weight": self.effect_pos_weight,
+            "effect_active": self.effect_active,
+            "focal_gamma_neg": self.focal_gamma_neg,
+            "focal_gamma_pos": self.focal_gamma_pos,
+            "use_physical_mask": self.use_physical_mask,
+        }
+
+
+def asymmetric_focal_bce(
+    logits: torch.Tensor, targets: torch.Tensor, pos_weight: torch.Tensor | None = None,
+    gamma_neg: float = 2.0, gamma_pos: float = 0.0, eps: float = 1e-8,
+) -> torch.Tensor:
+    """Per-element asymmetric focal BCE (ASL), numerically safe by construction.
+
+    Built on `logsigmoid` rather than `log(sigmoid(x))`, so a confident logit
+    of any magnitude stays finite. The focal modulating factor is DETACHED --
+    standard for ASL, and it also removes the only term whose gradient could
+    blow up (`d/dp p**gamma` is unbounded as p -> 0 for gamma < 1).
+
+    With `gamma_neg == gamma_pos == 0` this is exactly
+    `binary_cross_entropy_with_logits(..., pos_weight=pos_weight)`, which is
+    what makes the "focal off reproduces plain weighted BCE" regression test
+    meaningful rather than approximate.
+    """
+    log_p = F.logsigmoid(logits)          # log sigmoid(x)
+    log_1mp = F.logsigmoid(-logits)       # log (1 - sigmoid(x))
+    with torch.no_grad():
+        p = torch.sigmoid(logits)
+        mod_pos = (1.0 - p).clamp_min(eps).pow(gamma_pos) if gamma_pos > 0 else torch.ones_like(p)
+        mod_neg = p.clamp_min(eps).pow(gamma_neg) if gamma_neg > 0 else torch.ones_like(p)
+    w = pos_weight if pos_weight is not None else 1.0
+    loss_pos = -targets * mod_pos * log_p * w
+    loss_neg = -(1.0 - targets) * mod_neg * log_1mp
+    return loss_pos + loss_neg
+
+
+_FLAT_KEY = {"transition": "y_transition", "harmonic": "y_harmonic", "bend": "y_bend_type"}
+_HIER_LOOKUP_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
+
+
+def _hier_lookup(head: str, device, dtype) -> tuple[torch.Tensor, torch.Tensor]:
+    """Flat-class-id -> (presence, subtype-id) lookup tables for one head."""
+    key = (head, str(device), str(dtype))
+    hit = _HIER_LOOKUP_CACHE.get(key)
+    if hit is None:
+        vocab_size = len(TT._FLAT_VOCAB[head])
+        pres, sub = [], []
+        for flat_id in range(vocab_size):
+            p_, s_, _m = TT.flat_to_presence_subtype(head, flat_id)
+            pres.append(p_); sub.append(s_)
+        hit = (torch.tensor(pres, dtype=dtype, device=device),
+               torch.tensor(sub, dtype=torch.long, device=device))
+        _HIER_LOOKUP_CACHE[key] = hit
+    return hit
+
+
+def hier_targets(batch: dict[str, torch.Tensor], head: str) -> dict[str, torch.Tensor]:
+    """The (presence, presence_mask, subtype) targets for one head.
+
+    Prefers the tensors `dataset.encode_chunk` emits; DERIVES them from the
+    flat label when they are absent, so a batch built before this pass (a
+    cached tensor file, a hand-constructed test fixture, an external caller)
+    trains identically instead of raising a KeyError. The derivation is the
+    same `technique_taxonomy` mapping the dataset uses, so the two paths cannot
+    drift apart.
+    """
+    pk, mk, sk = f"y_{head}_presence", f"y_{head}_presence_mask", f"y_{head}_subtype"
+    if pk in batch and mk in batch and sk in batch:
+        return {"presence": batch[pk], "mask": batch[mk], "subtype": batch[sk]}
+
+    flat = batch[_FLAT_KEY[head]]
+    dtype = batch["y_effects"].dtype if "y_effects" in batch else torch.float32
+    pres_tab, sub_tab = _hier_lookup(head, flat.device, dtype)
+    labeled = flat != TT.IGNORE_INDEX
+    safe = flat.clamp(min=0)
+    presence = torch.where(labeled, pres_tab[safe], torch.zeros_like(pres_tab[safe]))
+    subtype = torch.where(labeled, sub_tab[safe], torch.full_like(flat, TT.IGNORE_INDEX))
+    return {"presence": presence, "mask": labeled.to(dtype), "subtype": subtype}
+
+
+def _masked_mean(per_element: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, int]:
+    """Mean over a mask, returning a differentiable finite zero when empty.
+
+    `(x * 0).sum()` rather than a fresh scalar so the term always keeps a
+    gradient path to the head that produced it -- a head whose loss silently
+    detaches on an unlucky batch is a head that stops training without saying so.
+    """
+    n = int(mask.sum().item())
+    if n == 0:
+        return per_element.sum() * 0.0, 0
+    return (per_element * mask).sum() / mask.sum().clamp_min(1.0), n
+
+
+def hierarchical_technique_losses(
+    technique_logits: dict[str, torch.Tensor], batch: dict[str, torch.Tensor],
+    weights: dict[str, float], cfg: TechniqueLossConfig,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Presence + subtype losses for transition / harmonic / bend.
+
+    Each head contributes two independently-gated terms:
+
+      presence  BCE over every EXAMINED note, with a capped `pos_weight`
+      subtype   CE over POSITIVE notes only -- enforced by the labels
+                themselves (`y_*_subtype` is -100 on every negative), not by a
+                mask this function has to remember to apply
+
+    For transitions the subtype softmax is additionally restricted to the
+    PHYSICALLY possible classes for that note (a hammer-on that does not ascend
+    is impossible), and for every head it is restricted to the classes the
+    rare-class policy actually kept. Both restrictions use a finite floor, never
+    -inf: a row whose target is -100 is skipped by cross-entropy but still goes
+    through `log_softmax`, and an all -inf row there returns NaN.
+    """
+    device = batch["pad_mask"].device
+    total = torch.zeros((), device=device)
+    m: dict[str, float] = {}
+
+    for head in TT.HIERARCHICAL_HEADS:
+        w_pres = weights.get(f"{head}_presence", 0.0)
+        w_sub = weights.get(f"{head}_subtype", 0.0)
+        if w_pres <= 0 and w_sub <= 0:
+            continue
+
+        tgt = hier_targets(batch, head)
+
+        # ---- presence ---------------------------------------------------- #
+        if w_pres > 0:
+            pmask = tgt["mask"]
+            ptarget = tgt["presence"]
+            plogit = technique_logits[f"{head}_presence"]
+            pw = torch.tensor(cfg.presence_pos_weight.get(head, 1.0),
+                              dtype=plogit.dtype, device=device)
+            per = asymmetric_focal_bce(
+                plogit, ptarget, pos_weight=pw,
+                gamma_neg=cfg.focal_gamma_neg, gamma_pos=cfg.focal_gamma_pos)
+            loss, n = _masked_mean(per, pmask)
+            if n:
+                total = total + w_pres * loss
+                m[f"{head}_presence"] = loss.item()
+                m[f"{head}_presence_n"] = n
+                m[f"{head}_positive_n"] = int((ptarget * pmask).sum().item())
+
+        # ---- subtype (positives only) ------------------------------------ #
+        if w_sub > 0:
+            raw = tgt["subtype"]                                   # (B,T), -100 on negatives
+            logits = technique_logits[f"{head}_subtype"]           # (B,T,C)
+            C = logits.size(-1)
+
+            # Rare-class policy: remap or drop, via a table lookup so the
+            # decision is data, not branching.
+            table = cfg.remap_table(head, device)
+            safe = raw.clamp(min=0)
+            target = torch.where(raw == TT.IGNORE_INDEX,
+                                 torch.full_like(raw, TT.IGNORE_INDEX),
+                                 table[safe])
+
+            keep = cfg.trainable_mask(head, device).view(*([1] * (logits.dim() - 1)), C) > 0
+            if head == "transition" and cfg.use_physical_mask:
+                keep = keep & (batch["transition_subtype_legal"] > 0)
+            masked_logits = logits.masked_fill(~keep, MASK_FLOOR)
+
+            n_pos = int((target != TT.IGNORE_INDEX).sum().item())
+            if n_pos:
+                sub_loss = F.cross_entropy(
+                    masked_logits.reshape(-1, C), target.reshape(-1),
+                    ignore_index=TT.IGNORE_INDEX, reduction="mean")
+            else:
+                sub_loss = masked_logits.sum() * 0.0
+            total = total + w_sub * sub_loss
+            m[f"{head}_subtype"] = sub_loss.item()
+            m[f"{head}_subtype_n"] = n_pos
+
+    return total, m
+
+
+def bend_positive_mask(batch: dict[str, torch.Tensor]) -> torch.Tensor:
+    """(B, T) float: notes that carry an ACTUAL bend.
+
+    Bend magnitude and bend-curve regression are only meaningful where a bend
+    exists. Training them on every examined note -- which is what
+    `y_bend_type != -100` selects, and what this codebase did before -- makes
+    >99 % of their examples "predict zero", so both heads learn the constant
+    zero function and the handful of real bends contribute nothing detectable.
+    The presence head already answers "is there a bend"; these heads should
+    only ever answer "what shape is it".
+    """
+    tgt = hier_targets(batch, "bend")
+    return tgt["presence"] * tgt["mask"]
+
+# --------------------------------------------------------------------------- #
 # Technique multi-task losses (additive, masked, same pattern as chord_ce)
 # --------------------------------------------------------------------------- #
 def technique_losses(
     technique_logits: dict[str, torch.Tensor], batch: dict[str, torch.Tensor], weights: dict[str, float],
+    cfg: "TechniqueLossConfig | None" = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Each term is independently gated on (weight > 0 AND this batch has at
     least one labeled example for it) -- exactly the chord_ce gating pattern
@@ -408,8 +720,16 @@ def technique_losses(
     not-yet-regenerated legacy corpus files simply skips these terms rather
     than training against fabricated negatives."""
     device = batch["pad_mask"].device
+    cfg = cfg or TechniqueLossConfig.neutral()
     extra = torch.zeros((), device=device)
     m: dict[str, float] = {}
+
+    # Hierarchical presence/subtype terms -- the actual anti-collapse
+    # objective. Additive and independently weighted, so a run can enable
+    # them, the flat terms, or both.
+    hier_loss, hier_m = hierarchical_technique_losses(technique_logits, batch, weights, cfg)
+    extra = extra + hier_loss
+    m.update(hier_m)
 
     if weights.get("transition", 0) > 0 and bool((batch["y_transition"] != -100).any()):
         trans_ce = F.cross_entropy(
@@ -420,11 +740,26 @@ def technique_losses(
         m["transition"] = trans_ce.item()
 
     if weights.get("effects", 0) > 0 and bool((batch["y_effects_mask"] > 0).any()):
-        bce = F.binary_cross_entropy_with_logits(technique_logits["effects"], batch["y_effects"], reduction="none")
-        mask = batch["y_effects_mask"].unsqueeze(-1)
-        eff_bce = (bce * mask).sum() / mask.sum().clamp_min(1.0) / max(1, bce.size(-1))
+        # Capped class-balanced + asymmetric focal BCE. Plain unweighted BCE on
+        # a head where every flag is 99.5-99.99 % negative is minimised by
+        # predicting "absent" everywhere, and the easy negatives supply so much
+        # of the total loss that the rare positives never move it. The per-flag
+        # pos_weight (capped -- an uncapped 1/frequency for a 0.01 %-positive
+        # flag is ~10,000, which destabilises rather than balances) and
+        # gamma_neg (down-weights negatives the model already gets right)
+        # attack the two halves of that separately.
+        eff_logits = technique_logits["effects"]
+        pw = cfg.effect_weight_tensor(device).to(eff_logits.dtype)
+        per = asymmetric_focal_bce(
+            eff_logits, batch["y_effects"], pos_weight=pw,
+            gamma_neg=cfg.focal_gamma_neg, gamma_pos=cfg.focal_gamma_pos)
+        # note-level mask (was this note examined) x flag-level mask (does this
+        # flag have enough TRAIN support to be worth learning at all)
+        mask = batch["y_effects_mask"].unsqueeze(-1) * cfg.effect_active_tensor(device).to(per.dtype)
+        eff_bce, n_eff = _masked_mean(per, mask)
         extra = extra + weights["effects"] * eff_bce
         m["effects"] = eff_bce.item()
+        m["effects_n"] = n_eff
 
     if weights.get("harmonic", 0) > 0 and bool((batch["y_harmonic"] != -100).any()):
         harm_ce = F.cross_entropy(
@@ -444,10 +779,15 @@ def technique_losses(
 
     if weights.get("bend_magnitude", 0) > 0 and bool((batch["y_bend_mask"] > 0).any()):
         mag_mse = F.mse_loss(technique_logits["bend_magnitude"], batch["y_bend_magnitude"], reduction="none")
-        mask = batch["y_bend_mask"]
-        mag_loss = (mag_mse * mask).sum() / mask.sum().clamp_min(1.0)
+        # y_bend_mask already means "has bend points", but gate on
+        # bend-POSITIVE explicitly too: the two are meant to coincide, and this
+        # makes it impossible for a future label change to quietly reintroduce
+        # "regress zero on every unbent note" as 99 % of the examples.
+        mask = batch["y_bend_mask"] * bend_positive_mask(batch)
+        mag_loss, n_mag = _masked_mean(mag_mse, mask)
         extra = extra + weights["bend_magnitude"] * mag_loss
         m["bend_magnitude"] = mag_loss.item()
+        m["bend_magnitude_n"] = n_mag
 
     if weights.get("voice", 0) > 0 and bool((batch["y_voice"] != -100).any()):
         voice_ce = F.cross_entropy(
@@ -457,26 +797,33 @@ def technique_losses(
         extra = extra + weights["voice"] * voice_ce
         m["voice"] = voice_ce.item()
 
-    if weights.get("bend_curve", 0) > 0 and bool((batch["y_bend_type"] != -100).any()):
+    if weights.get("bend_curve", 0) > 0 and bool((bend_positive_mask(batch) > 0).any()):
         # Presence is supervised on every EXAMINED note (real negative when
         # no bend/fewer than K points -- see dataset.py's _technique_tensors);
         # position/semitone regression is masked further by the presence
         # TARGET itself, so it only backprops through slots a real point
         # occupies (matches BEND_CURVE_K's docstring in schema.py).
-        examined = (batch["y_bend_type"] != -100).float().unsqueeze(-1)  # (B,T,1), broadcasts over K
+        # Gated on bend-POSITIVE notes, not on examined ones. Under the old
+        # gate >99 % of the curve head examples were unbent notes whose target
+        # curve is all-zero, so the head learned the constant zero function;
+        # "is there a bend at all" is the presence head job, and duplicating it
+        # here only buried the shape signal.
+        examined = bend_positive_mask(batch).unsqueeze(-1)               # (B,T,1), broadcasts over K
         presence_target = batch["y_bend_curve_presence"]                 # (B,T,K)
         presence_bce = F.binary_cross_entropy_with_logits(
             technique_logits["bend_curve_presence"], presence_target, reduction="none")
-        presence_loss = (presence_bce * examined).sum() / (examined.sum() * S.BEND_CURVE_K).clamp_min(1.0)
+        presence_loss, n_curve = _masked_mean(presence_bce, examined.expand_as(presence_bce))
 
         pos_mse = F.mse_loss(technique_logits["bend_curve_pos"], batch["y_bend_curve_pos"], reduction="none")
         sem_mse = F.mse_loss(technique_logits["bend_curve_semitone"], batch["y_bend_curve_semitone"], reduction="none")
-        pos_loss = (pos_mse * presence_target).sum() / presence_target.sum().clamp_min(1.0)
-        sem_loss = (sem_mse * presence_target).sum() / presence_target.sum().clamp_min(1.0)
+        point_mask = presence_target * examined
+        pos_loss, _ = _masked_mean(pos_mse, point_mask)
+        sem_loss, _ = _masked_mean(sem_mse, point_mask)
 
         curve_loss = presence_loss + pos_loss + sem_loss
         extra = extra + weights["bend_curve"] * curve_loss
         m["bend_curve"] = curve_loss.item()
+        m["bend_curve_n"] = n_curve
 
     if weights.get("transition_source", 0) > 0 and bool((batch["y_transition_source_candidate"] != -100).any()):
         src_ce = F.cross_entropy(
@@ -770,6 +1117,16 @@ def single_guitar_active_heads(weights_used: dict[str, float]) -> dict[str, bool
     randomly-initialized) parameters happen to be present in
     model.state_dict() (they always are)."""
     active = {h: (w > 0) for h, w in weights_used.items() if h in HEAD_GROUPS}
+    # The hierarchical heads have TWO weights each (presence + subtype) and one
+    # head group. The group counts as trained iff either term was active --
+    # asserting a group is trained because its task was trained, when in fact
+    # both its weights were 0, is exactly the false provenance the explicit
+    # trained_heads bookkeeping exists to prevent.
+    for head in TT.HIERARCHICAL_HEADS:
+        group = f"{head}_hier"
+        if group in HEAD_GROUPS:
+            active[group] = (weights_used.get(f"{head}_presence", 0.0) > 0
+                             or weights_used.get(f"{head}_subtype", 0.0) > 0)
     active["candidate_scorer"] = False
     return active
 
@@ -1033,6 +1390,8 @@ def evaluate(
     max_batches: int | None = None,
     technique_weights: dict[str, float] | None = None,
     max_fret: int = MAX_FRET,
+    loss_cfg: "TechniqueLossConfig | None" = None,
+    tune_thresholds: bool = False,
 ) -> dict[str, Any]:
     model.eval()
     total_loss = total_ce = total_play = 0.0
@@ -1062,6 +1421,22 @@ def evaluate(
     eff_preds: list[list[int]] = []; eff_targets: list[list[int]] = []
     bend_mag_errors: list[float] = []
     trans_valid_count = trans_valid_total = 0     # physical-validity rate among argmax predictions
+    # Hierarchical heads: presence scores (for threshold-free reporting and
+    # threshold TUNING) and subtype predictions over positives only.
+    # `transition_has_source` is a model INPUT derived from the transition
+    # label's own `source_note_id`, so "predict presence = has_source" is a
+    # LEAKED predictor available to the network for free. It is reported beside
+    # the transition presence head for the same reason the majority-class
+    # baseline is reported beside accuracy: without it, a presence F1 near 98 %
+    # reads as a result rather than as the feature being copied.
+    trans_has_source_scores: list[float] = []
+    hier_pres_scores: dict[str, list[float]] = {h: [] for h in TT.HIERARCHICAL_HEADS}
+    hier_pres_targets: dict[str, list[int]] = {h: [] for h in TT.HIERARCHICAL_HEADS}
+    hier_sub_preds: dict[str, list[int]] = {h: [] for h in TT.HIERARCHICAL_HEADS}
+    hier_sub_targets: dict[str, list[int]] = {h: [] for h in TT.HIERARCHICAL_HEADS}
+    # Raw effect probabilities, kept so per-flag thresholds can be tuned on
+    # VALIDATION rather than assumed to be 0.5.
+    eff_scores: list[list[float]] = []
 
     for batch in loader:
         if max_batches is not None and n_batches >= max_batches:
@@ -1075,7 +1450,7 @@ def evaluate(
             logits, batch["y_string"], batch["pitch"], batch["delta_bucket"],
             batch["pad_mask"], batch["tuning"], batch["capo"], max_fret=max_fret,
         )
-        extra, tm = technique_losses(technique_logits, batch, tw)
+        extra, tm = technique_losses(technique_logits, batch, tw, loss_cfg)
         m["loss"] = m["loss"] + extra.item()
         m.update(tm)
         total_loss += m["loss"]; total_ce += m["ce"]; total_play += m["playability"]
@@ -1103,9 +1478,11 @@ def evaluate(
 
         eff_mask = batch["y_effects_mask"] > 0
         if eff_mask.any():
-            eff_pred = (torch.sigmoid(technique_logits["effects"]) > 0.5).long()
+            eff_prob = torch.sigmoid(technique_logits["effects"])
+            eff_pred = (eff_prob > 0.5).long()
             eff_preds.extend(eff_pred[eff_mask].tolist())
             eff_targets.extend(batch["y_effects"][eff_mask].long().tolist())
+            eff_scores.extend(eff_prob[eff_mask].tolist())
 
         y_harm = batch["y_harmonic"]
         harm_keep = y_harm != -100
@@ -1125,6 +1502,37 @@ def evaluate(
         if bm_mask.any():
             err = (technique_logits["bend_magnitude"] - batch["y_bend_magnitude"]).abs()
             bend_mag_errors.extend(err[bm_mask].tolist())
+
+        # ---- hierarchical presence / subtype ----
+        for head in TT.HIERARCHICAL_HEADS:
+            if f"{head}_presence" not in technique_logits:
+                continue
+            tgt = hier_targets(batch, head)
+            pm = tgt["mask"] > 0
+            if pm.any():
+                hier_pres_scores[head].extend(
+                    torch.sigmoid(technique_logits[f"{head}_presence"])[pm].tolist())
+                hier_pres_targets[head].extend(tgt["presence"][pm].long().tolist())
+                if head == "transition":
+                    trans_has_source_scores.extend(
+                        batch["transition_has_source"][pm].float().tolist())
+            # Subtype accuracy is measured ONLY where a positive exists -- the
+            # same restriction the loss uses. Scoring it over negatives would
+            # re-import the majority class the hierarchy exists to remove.
+            raw = tgt["subtype"]
+            sm = raw != TT.IGNORE_INDEX
+            if sm.any():
+                sub_logits = technique_logits[f"{head}_subtype"]
+                if head == "transition" and loss_cfg is not None and loss_cfg.use_physical_mask:
+                    sub_logits = sub_logits.masked_fill(
+                        batch["transition_subtype_legal"] <= 0, MASK_FLOOR)
+                pred = sub_logits.argmax(-1)
+                table = (loss_cfg or TechniqueLossConfig.neutral()).remap_table(head, device)
+                mapped = table[raw.clamp(min=0)]
+                keep = sm & (mapped != TT.IGNORE_INDEX)
+                if keep.any():
+                    hier_sub_preds[head].extend(pred[keep].tolist())
+                    hier_sub_targets[head].extend(mapped[keep].tolist())
 
         # ---- string metrics, over the SAME usable-note definition the loss
         # uses (constraints.string_supervision_masks) -- an unsupported note
@@ -1179,6 +1587,50 @@ def evaluate(
     eff_report = multilabel_report(eff_preds, eff_targets, S.NOTE_EFFECTS)
     bend_mag_report = regression_report(bend_mag_errors)
 
+    # Per-flag thresholds fitted on VALIDATION scores. A single 0.5 is the
+    # wrong rule for flags spanning 8 % to 0.01 % positive: after
+    # class-balanced training their calibrated operating points differ by
+    # orders of magnitude, so a shared threshold reports either no recall or no
+    # precision for most of them. Tuned on val and reported on val, so this is
+    # an optimistic estimate by construction -- labelled as tuned wherever it
+    # appears, never mixed into the training statistics.
+    eff_tuned = (tune_multilabel_thresholds(eff_scores, eff_targets, S.NOTE_EFFECTS)
+                 if (tune_thresholds and eff_scores) else None)
+
+    hier_reports: dict[str, Any] = {}
+    for head in TT.HIERARCHICAL_HEADS:
+        pres_t, pres_rep = (None, None)
+        if hier_pres_targets[head]:
+            pres_t, pres_rep = tune_binary_threshold(
+                hier_pres_scores[head], hier_pres_targets[head])
+        sub_rep = classification_report(
+            hier_sub_preds[head], hier_sub_targets[head],
+            TT.NUM_SUBTYPES[head], TT.SUBTYPE_VOCAB[head])
+        # What a free, label-derived feature alone already achieves. The
+        # presence head has to beat THIS, not 0.5, to have learned anything.
+        leaked = None
+        if head == "transition" and trans_has_source_scores:
+            leaked = binary_report(trans_has_source_scores, hier_pres_targets[head], 0.5)
+
+        hier_reports[head] = {
+            "presence": pres_rep,
+            "presence_leaked_feature_baseline": leaked,
+            "presence_threshold": pres_t,
+            "presence_at_half": (binary_report(hier_pres_scores[head], hier_pres_targets[head], 0.5)
+                                 if hier_pres_targets[head] else None),
+            "subtype": sub_rep,
+            # THE headline number: macro-F1 over real technique classes only.
+            "subtype_macro_f1": sub_rep["macro_f1"],
+        }
+
+    # Positive-class macro-F1 of the FLAT heads, directly comparable with the
+    # pre-change baseline (which had only these heads).
+    flat_positive_f1 = {
+        "transition": positive_macro_f1(trans_report, set(TT.TRANSITION_NEGATIVE)),
+        "harmonic": positive_macro_f1(harm_report, {"NONE"}),
+        "bend_type": positive_macro_f1(bt_report, {"NONE"}),
+    }
+
     return {
         "loss": total_loss / n,
         "ce": total_ce / n,
@@ -1225,6 +1677,11 @@ def evaluate(
             # N/A (None), never NaN, when no bend was labeled in this split.
             "bend_magnitude_mae": bend_mag_report["mae"],
             "bend_magnitude_report": bend_mag_report,
+            # ---- the rare-class criterion -------------------------------- #
+            "flat_positive_macro_f1": flat_positive_f1,
+            "hierarchical": hier_reports,
+            "effects_tuned": eff_tuned,
+            "effects_macro_f1_tuned": (eff_tuned or {}).get("macro_f1"),
         },
     }
 
@@ -1257,6 +1714,67 @@ def _log_class_report(logger: Logger, head: str, rep: dict[str, Any], top_k: int
             f"            {c['name']:<22} P {_pct(c['precision'])} R {_pct(c['recall'])} "
             f"F1 {_pct(c['f1'])} n={c['support']:,}"
         )
+
+
+
+def _log_rare_technique_insights(logger: Logger, t: dict[str, Any]) -> None:
+    """The rare-class scoreboard: presence, subtype, and POSITIVE-class macro-F1.
+
+    Overall accuracy and overall macro-F1 both stay high while a head is
+    collapsed (the absence class alone carries them), so neither can tell you
+    whether this work succeeded. Positive-class macro-F1 and the
+    predicted-positive rate can: a collapsed head reads 0.0 and ~0 %
+    respectively, no matter what its accuracy says.
+    """
+    flat = t.get("flat_positive_macro_f1") or {}
+    if flat:
+        logger.log("        POSITIVE-class macro-F1 (flat heads, comparable to baseline): "
+                   + " | ".join(f"{k} {_pct(v)}" for k, v in flat.items()))
+
+    hier = t.get("hierarchical") or {}
+    for head, rep in hier.items():
+        pres = rep.get("presence")
+        sub = rep.get("subtype") or {}
+        if not pres and not sub.get("support"):
+            continue
+        line = f"        {head} hierarchical:"
+        if pres:
+            at_half = rep.get("presence_at_half") or {}
+            leaked = rep.get("presence_leaked_feature_baseline")
+            line += (f" presence F1 {_pct(pres['f1'])} @thr {rep.get('presence_threshold'):.2f}"
+                     f" (P {_pct(pres['precision'])} R {_pct(pres['recall'])},"
+                     f" pred-pos {_pct(pres['predicted_positive_rate'])},"
+                     f" true-pos {_pct(pres['positive_rate'])}, n={pres['support']:,};"
+                     f" F1 @0.5 {_pct(at_half.get('f1'))})")
+        logger.log(line)
+        if pres and rep.get("presence_leaked_feature_baseline"):
+            lk = rep["presence_leaked_feature_baseline"]
+            verdict = ("BEATS it" if (pres.get("f1") or 0) > (lk.get("f1") or 0)
+                       else "DOES NOT BEAT IT -- this head has learned nothing beyond "
+                            "copying a label-derived input")
+            logger.log(f"            leaked-feature baseline (predict presence = "
+                       f"transition_has_source, which is derived from the LABEL): "
+                       f"F1 {_pct(lk.get('f1'))} -- head {verdict}")
+        if sub.get("support"):
+            logger.log(f"            subtype (positives only): acc {_pct(sub['accuracy'])} | "
+                       f"macro-F1 {_pct(sub['macro_f1'])} | n={sub['support']:,}")
+            for c in sorted((c for c in sub["per_class"] if c["support"] > 0),
+                            key=lambda c: c["support"])[:6]:
+                logger.log(f"                {c['name']:<22} P {_pct(c['precision'])} "
+                           f"R {_pct(c['recall'])} F1 {_pct(c['f1'])} "
+                           f"pred-pos {_pct(c.get('predicted_positive_rate'))} n={c['support']:,}")
+
+    tuned = t.get("effects_tuned")
+    if tuned and tuned.get("labels_with_support"):
+        logger.log(f"        effects @ VAL-TUNED per-flag thresholds: macro-F1 "
+                   f"{_pct(tuned['macro_f1'])} over {tuned['labels_with_support']} flag(s) with support "
+                   f"(vs {_pct((t.get('effects_report') or {}).get('macro_f1'))} at a shared 0.5)")
+        for lab in sorted((l for l in tuned["per_label"] if l["positives"] > 0),
+                          key=lambda l: l["positives"])[:6]:
+            logger.log(f"            {lab['name']:<16} thr {lab['threshold']:.2f}"
+                       f"{'' if lab['tuned'] else ' (default, too few positives to tune)'} "
+                       f"P {_pct(lab['precision'])} R {_pct(lab['recall'])} F1 {_pct(lab['f1'])} "
+                       f"pred-pos {_pct(lab['predicted_positive_rate'])} n={lab['positives']:,}")
 
 
 def log_insights(logger: Logger, tag: str, step: int, epoch: int, m: dict[str, Any], best_acc: float) -> None:
@@ -1309,6 +1827,8 @@ def log_insights(logger: Logger, tag: str, step: int, epoch: int, m: dict[str, A
     else:
         logger.log("        effects: no labeled examples in this split (N/A)")
 
+    _log_rare_technique_insights(logger, t)
+
     bm = t.get("bend_magnitude_report") or {}
     if bm.get("support"):
         logger.log(f"        bend magnitude: MAE {bm['mae']:.3f} RMSE {bm['rmse']:.3f} "
@@ -1321,6 +1841,73 @@ def log_insights(logger: Logger, tag: str, step: int, epoch: int, m: dict[str, A
 # --------------------------------------------------------------------------- #
 # Schedule
 # --------------------------------------------------------------------------- #
+
+def _setup_rare_technique_objectives(
+    class_stats: "TechniqueStats | None", policy: TT.RareClassPolicy,
+    args: argparse.Namespace, logger: Logger,
+) -> tuple[TechniqueLossConfig, dict]:
+    """Turn TRAIN-split label counts into the loss configuration and the
+    sampler's rare-label set, logging every decision it makes.
+
+    A run that silently picks class weights is a run nobody can reproduce or
+    argue with, so the chosen weights, the merged/ignored classes and the
+    oversampling target all go into the log and into `--class-stats-out`.
+    """
+    if class_stats is None or class_stats.songs == 0:
+        logger.log("No TRAIN technique statistics available -- rare-technique objectives "
+                   "run UNBALANCED (plain masked BCE/CE, no rare-class policy, no oversampling). "
+                   "This is the correct fallback, not a silent default: without counts there is "
+                   "no honest way to choose a weight.")
+        return TechniqueLossConfig.neutral(), {}
+
+    for line in class_stats.summary_lines(policy):
+        logger.log("  " + line)
+
+    cfg = TechniqueLossConfig.from_stats(
+        class_stats, policy,
+        presence_weight_cap=args.presence_weight_cap,
+        effect_weight_cap=args.effect_weight_cap,
+        focal_gamma_neg=args.focal_gamma_neg,
+        focal_gamma_pos=args.focal_gamma_pos,
+        use_physical_mask=not args.no_physical_class_mask,
+    )
+    inactive = [n for n, a in zip(S.NOTE_EFFECTS, cfg.effect_active) if not a]
+    if inactive:
+        logger.log(f"  effects masked out (< {policy.effect_min_support} TRAIN positives): {inactive}")
+    logger.log(f"  effects pos_weight (capped at {args.effect_weight_cap}): "
+               + ", ".join(f"{n}={w:.1f}" for n, w in zip(S.NOTE_EFFECTS, cfg.effect_pos_weight)
+                           if w > 1.0))
+    logger.log(f"  asymmetric focal BCE: gamma_neg={cfg.focal_gamma_neg} gamma_pos={cfg.focal_gamma_pos} | "
+               f"physical class mask: {'on' if cfg.use_physical_mask else 'OFF'}")
+
+    rare_labels: dict = {}
+    if args.rare_chunk_fraction > 0:
+        rare_labels = rare_positive_labels(
+            class_stats, class_stats.build_remaps(policy), args.rare_chunk_max_frequency)
+        listed = {k: sorted(v) for k, v in rare_labels.items() if v}
+        if listed:
+            logger.log(f"  technique-aware sampler: target {args.rare_chunk_fraction*100:.0f}% of TRAIN "
+                       f"chunks carrying a rare positive label (train stream only -- the val stream "
+                       f"is never oversampled, so val stays a clean estimate of real-world mix)")
+            for head, names in listed.items():
+                logger.log(f"      rare {head}: {names}")
+        else:
+            logger.log("  technique-aware sampler: no label is rare enough to oversample -- disabled")
+            rare_labels = {}
+
+    if args.class_stats_out:
+        out = Path(args.class_stats_out)
+        payload = class_stats.to_dict()
+        payload["policy"] = {"mode": policy.mode, "min_support": policy.min_support,
+                             "effect_min_support": policy.effect_min_support}
+        payload["loss_config"] = cfg.to_dict()
+        payload["rare_sampler_labels"] = {k: sorted(v) for k, v in rare_labels.items()}
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        logger.log(f"  wrote TRAIN class statistics -> {out}")
+    return cfg, rare_labels
+
+
 def get_cosine_schedule_with_warmup(optimizer: AdamW, num_warmup: int, num_training: int) -> LambdaLR:
     def lr_lambda(step: int) -> float:
         if step < num_warmup:
@@ -1381,6 +1968,11 @@ def main():
     parser.add_argument("--log-every", type=int, default=50, help="Steps between progress lines")
     parser.add_argument("--eval-every", type=int, default=0, help="Steps between validations (0 = once per epoch)")
     parser.add_argument("--eval-batches", type=int, default=0, help="Cap val batches per eval (0 = full val set)")
+    parser.add_argument("--max-steps-per-epoch", type=int, default=0,
+                        help="Stop each epoch after N optimizer steps (0 = the whole stream). "
+                             "Needed to compare runs fairly when technique-aware oversampling is on: "
+                             "it lengthens an epoch by roughly rare_fraction/(1-rare_fraction), so "
+                             "equal EPOCHS would silently give the oversampled run more gradient steps.")
     parser.add_argument("--resume", default=None, help="Path to a *.resume checkpoint to continue from")
     parser.add_argument("--patience", type=int, default=8,
                         help="Auto-stop after this many evals with no val-loss improvement (0 = never stop early)")
@@ -1413,6 +2005,47 @@ def main():
                         help="Weight of the transition SOURCE pointer loss (which lookback candidate is the "
                              "true source; 0 = off). Separate from --transition-weight, which trains the "
                              "transition TYPE classifier on the teacher-forced ground-truth source.")
+    # ---- rare-technique objectives (technique_taxonomy / technique_stats) -- #
+    parser.add_argument("--transition-presence-weight", type=float, default=0.3,
+                        help="Weight of the binary is-there-a-transition term (hierarchical head)")
+    parser.add_argument("--transition-subtype-weight", type=float, default=0.3,
+                        help="Weight of the which-transition term, computed over POSITIVE notes only")
+    parser.add_argument("--harmonic-presence-weight", type=float, default=0.15)
+    parser.add_argument("--harmonic-subtype-weight", type=float, default=0.15)
+    parser.add_argument("--bend-presence-weight", type=float, default=0.15)
+    parser.add_argument("--bend-subtype-weight", type=float, default=0.15)
+    parser.add_argument("--rare-class-mode", default="merge_other",
+                        choices=list(TT.RARE_MODES),
+                        help="What to do with a subtype the TRAIN split barely contains: keep it "
+                             "(capped weight), ignore it (excluded from the label space and from "
+                             "macro-F1), or merge it into the OTHER slot. Never an enormous weight.")
+    parser.add_argument("--rare-min-support", type=int, default=50,
+                        help="Subtype classes with fewer TRAIN positives than this hit --rare-class-mode")
+    parser.add_argument("--effect-min-support", type=int, default=50,
+                        help="Effect flags with fewer TRAIN positives than this are masked out of the BCE")
+    parser.add_argument("--presence-weight-cap", type=float, default=20.0,
+                        help="Cap on the presence heads' class-balanced pos_weight")
+    parser.add_argument("--effect-weight-cap", type=float, default=50.0,
+                        help="Cap on the per-flag class-balanced pos_weight of the effects BCE")
+    parser.add_argument("--focal-gamma-neg", type=float, default=2.0,
+                        help="Asymmetric-focal exponent on NEGATIVES (0 = plain weighted BCE)")
+    parser.add_argument("--focal-gamma-pos", type=float, default=0.0,
+                        help="Asymmetric-focal exponent on POSITIVES (normally 0: never down-weight a positive)")
+    parser.add_argument("--no-physical-class-mask", action="store_true",
+                        help="Disable masking physically impossible transition subtypes out of the softmax")
+    parser.add_argument("--rare-chunk-fraction", type=float, default=0.25,
+                        help="Target share of TRAIN chunks containing a rare positive technique label "
+                             "(0 disables technique-aware oversampling). Applies to the train stream only.")
+    parser.add_argument("--rare-chunk-max-frequency", type=float, default=0.02,
+                        help="A label counts as rare for the sampler below this share of examined notes")
+    parser.add_argument("--rare-reservoir", type=int, default=512,
+                        help="How many recently-seen rare chunks the oversampler keeps to draw from")
+    parser.add_argument("--class-stats-out", default=None,
+                        help="Write the TRAIN-split technique class statistics here (JSON)")
+    parser.add_argument("--tune-effect-thresholds", action="store_true", default=True,
+                        help="Fit per-flag effect decision thresholds on VALIDATION scores")
+    parser.add_argument("--no-tune-effect-thresholds", dest="tune_effect_thresholds",
+                        action="store_false")
     parser.add_argument("--beat-weight", type=float, default=0.1,
                         help="Weight of the beat-level (pick direction + strum/tremolo-bar presence) loss (0 = off)")
 
@@ -1472,7 +2105,22 @@ def main():
         "bend_magnitude": args.bend_magnitude_weight, "voice": args.voice_weight,
         "bend_curve": args.bend_curve_weight, "transition_source": args.transition_source_weight,
         "beat": args.beat_weight,
+        # Hierarchical rare-technique terms. The FLAT terms above stay enabled
+        # at their existing weights: they remain what inference.py reads, so
+        # zeroing them here would produce a checkpoint whose technique decoder
+        # is dead. The hierarchical terms are what carry the rare-class signal
+        # into the shared trunk.
+        "transition_presence": args.transition_presence_weight,
+        "transition_subtype": args.transition_subtype_weight,
+        "harmonic_presence": args.harmonic_presence_weight,
+        "harmonic_subtype": args.harmonic_subtype_weight,
+        "bend_presence": args.bend_presence_weight,
+        "bend_subtype": args.bend_subtype_weight,
     }
+    rare_policy = TT.RareClassPolicy(
+        mode=args.rare_class_mode, min_support=args.rare_min_support,
+        effect_min_support=args.effect_min_support,
+    )
 
     logger = Logger(args.log_dir)
     logger.log("=" * 78)
@@ -1503,9 +2151,22 @@ def main():
         val_files = [e["path"] for e in val_entries]
         train_chunks = sum(e["n_chunks"] for e in train_entries)
 
+        # TRAIN-ONLY class statistics, aggregated from the per-song counts the
+        # chunk index already collected -- over `train_entries`, never over
+        # `val_entries`. Deriving weights, a rare-class label space or a
+        # sampler target from counts that include validation leaks the
+        # validation distribution into training and inflates exactly the
+        # macro-F1 numbers this change is judged on.
+        from streaming_dataset import stats_from_entries
+        class_stats = stats_from_entries(train_entries, split="train")
+        loss_cfg, rare_labels = _setup_rare_technique_objectives(
+            class_stats, rare_policy, args, logger)
+
         stream_ds = StreamingGuitarDataset(
             train_files, seq_len=args.seq_len, stride=args.stride,
             augment=not args.no_augment, shuffle=True, shuffle_buffer=args.shuffle_buffer,
+            rare_labels=rare_labels, rare_fraction=args.rare_chunk_fraction,
+            rare_reservoir=args.rare_reservoir,
         )
         val_ds = StreamingGuitarDataset(
             val_files, seq_len=args.seq_len, stride=args.stride, augment=False, shuffle=False,
@@ -1515,10 +2176,17 @@ def main():
         val_loader = DataLoader(val_ds, batch_size=args.batch, collate_fn=collate_fn,
                                 num_workers=args.num_workers)
         steps_per_epoch = max(1, math.ceil(train_chunks / args.batch))
+        if args.max_steps_per_epoch:
+            steps_per_epoch = min(steps_per_epoch, args.max_steps_per_epoch)
         logger.log(f"Ready in {_fmt_secs(time.time() - t0)} | ~{steps_per_epoch:,} train batches/epoch")
     else:
         # ---- Map style: load everything into RAM (single song / small sets) ---- #
         from parser import load_song
+        # Map mode (single song / tiny subset): count labels directly from the
+        # TRAIN files after the split below, same train-only rule.
+        class_stats = None
+        loss_cfg = TechniqueLossConfig.neutral()
+        rare_labels = {}
         meta = load_song(args.data[0])["metadata"]
         tuning = args.tuning if args.tuning else meta["tuning"]
         capo = args.capo if args.capo is not None else meta["capo"]
@@ -1585,7 +2253,8 @@ def main():
         nonlocal best_val, best_acc
         mb = args.eval_batches or None
         m = evaluate(model, val_loader, args.device, max_batches=mb,
-                     technique_weights=technique_weights, max_fret=args.max_fret)
+                     technique_weights=technique_weights, max_fret=args.max_fret,
+                     loss_cfg=loss_cfg, tune_thresholds=args.tune_effect_thresholds)
         log_insights(logger, "val", global_step, epoch, m, best_acc)
         if m["loss"] < best_val:
             best_val = m["loss"]
@@ -1605,6 +2274,19 @@ def main():
             torch.save({
                 "model": model.state_dict(),
                 "training_args": vars(args),
+                # The rare-class decisions this checkpoint was trained under.
+                # Without them a subtype logit index is meaningless (was class
+                # 3 trained, or merged into OTHER, or ignored?), and the
+                # per-flag effect thresholds fitted on validation would have to
+                # be re-derived by whoever loads it.
+                "technique_class_stats": (class_stats.to_dict() if class_stats else None),
+                "technique_loss_config": loss_cfg.to_dict(),
+                "technique_rare_policy": {
+                    "mode": rare_policy.mode, "min_support": rare_policy.min_support,
+                    "effect_min_support": rare_policy.effect_min_support,
+                },
+                "effect_thresholds": ((m.get("technique", {}).get("effects_tuned") or {})
+                                      .get("thresholds")),
                 **ckpt_meta,
             }, args.save)
             logger.log(f"        saved BEST (val_loss {best_val:.4f}) -> {args.save} "
@@ -1654,7 +2336,7 @@ def main():
                 loss = loss + args.chord_weight * chord_ce
                 m["chord"] = chord_ce.item()
 
-            tech_extra, tech_m = technique_losses(technique_logits, batch, technique_weights)
+            tech_extra, tech_m = technique_losses(technique_logits, batch, technique_weights, loss_cfg)
             loss = loss + tech_extra
             m.update(tech_m)
 
@@ -1715,6 +2397,11 @@ def main():
 
             if args.eval_every and global_step % args.eval_every == 0:
                 run_eval(epoch)
+
+            if args.max_steps_per_epoch and i >= args.max_steps_per_epoch:
+                logger.log(f"   [step cap] stopping epoch {epoch} at {i} steps "
+                           f"(--max-steps-per-epoch)")
+                break
 
         if epoch_contract["notes_real"]:
             excluded = epoch_contract["notes_real"] - epoch_contract["notes_usable"]
